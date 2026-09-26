@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organ Donor Tribute | The Protocol</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../css/styles.css?v=20260817premium">
+</head>
+<body class="donor-page">
+    <header class="donor-nav">
+        <a class="donor-brand" href="../index.html">
+            <span class="donor-brand-mark" aria-label="The Protocol logo">
+                <span class="logo-cross" aria-hidden="true"></span>
+                <span class="logo-pulse" aria-hidden="true"></span>
+            </span>
+            <span><small>The Protocol</small><strong>Life Legacy</strong></span>
+        </a>
+        <nav aria-label="Primary navigation">
+            <a href="../index.html">Home</a>
+            <a href="doctors.html">Our Specialists</a>
+            <a href="appointments.html">Appointments</a>
+            <a href="contact.html">Contact Us</a>
+        </nav>
+    </header>
+
+    <main class="donor-main">
+        <section class="donor-hero">
+            <div class="donor-hero-copy">
+                <p class="donor-kicker">A living legacy</p>
+                <h1>Give tomorrow<br><em>a heartbeat.</em></h1>
+                <p class="donor-hero-text">Every donor carries a quiet act of courage. This wall remembers the people who choose to leave hope behind.</p>
+                <a class="donor-hero-link" href="#donor-form">Leave your tribute <span>↓</span></a>
+            </div>
+            <div class="donor-heartbeat-visual" aria-label="Animated heartbeat line">
+                <svg class="donor-heartbeat-svg" viewBox="0 0 700 260" role="img" aria-hidden="true">
+                    <path class="heartbeat-line" d="M12 142 H125 L146 142 L165 112 L183 197 L207 35 L232 166 L251 142 H345 L365 142 L384 94 L403 183 L426 60 L450 142 H493" />
+                    <path class="heartbeat-heart" d="M548 78 C518 42 464 62 464 108 C464 157 548 208 548 208 C548 208 632 157 632 108 C632 62 578 42 548 78 Z" />
+                    <path class="heartbeat-heart-line" d="M492 142 H530 L543 101 L558 178 L574 121 L584 142 H642" />
+                </svg>
+            </div>
+        </section>
+
+        <section class="donor-content-grid">
+            <form id="organ-donor-form" class="organ-donor-form donor-form-premium">
+                <p class="eyebrow">Make it personal</p>
+                <h2 id="donor-form">Add your name to the legacy</h2>
+                <p class="donor-form-intro">Your tribute will appear publicly on this wall. No medical details are collected.</p>
+                <div class="form-group">
+                    <label for="donor-name">Your name</label>
+                    <input type="text" id="donor-name" maxlength="120" placeholder="Full name" required>
+                </div>
+                <div class="form-group">
+                    <label for="donor-organ">Donation intention</label>
+                    <select id="donor-organ">
+                        <option>Any organ</option>
+                        <option>Kidney</option>
+                        <option>Liver</option>
+                        <option>Heart</option>
+                        <option>Lung</option>
+                        <option>Cornea</option>
+                        <option>Tissue</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="donor-tribute">Words of hope <span>(optional)</span></label>
+                    <textarea id="donor-tribute" maxlength="300" placeholder="A short message for the future"></textarea>
+                </div>
+                <button type="submit" class="donor-submit-button">Add my tribute <span>↗</span></button>
+                <p id="organ-donor-status" class="form-status" role="status"></p>
+                <section id="donor-certificate" class="donor-certificate" hidden aria-live="polite">
+                    <p class="eyebrow">Your certificate</p>
+                    <h3>Thank you for leaving a legacy.</h3>
+                    <p id="certificate-preview" class="certificate-preview"></p>
+                    <button type="button" id="print-donor-certificate" class="certificate-button">Print / Save Certificate</button>
+                </section>
+            </form>
+
+            <section class="organ-tribute-wall donor-wall-premium" aria-labelledby="tribute-wall-title">
+                <div class="tribute-wall-header">
+                    <div>
+                        <p class="eyebrow">Remembered with gratitude</p>
+                        <h2 id="tribute-wall-title">The donor wall</h2>
+                    </div>
+                    <span id="organ-donor-count" class="tribute-count">0 donors</span>
+                </div>
+                <div id="organ-donor-list" class="organ-donor-list">
+                    <p class="muted-text">Loading donor tributes...</p>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <footer class="donor-footer">
+        <span>The Protocol Cardiology</span>
+        <span>Honouring every gift of life</span>
+    </footer>
+    <script src="../js/app.js?v=20260817" defer></script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Protocol Hospital</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <script>
+        window.__APP_API_BASE__ = 'https://your-backend-url.com/api';
+    </script>
+    <script src="js/runtime-config.js?v=20260726c" defer></script>
+    <script src="js/auth.js?v=20260726c" defer></script>
+    <script src="js/app.js?v=20260726c" defer></script>
+</head>
+<body class="homepage-protocol" id="home">
+    <div class="protocol-stage">
+        <header class="protocol-nav-shell">
+            <div class="protocol-logo-block">
+                <div class="protocol-logo-mark">&#10084;</div>
+                <div class="protocol-logo-text">
+                    <p>Hospital</p>
+                    <h1>The Protocol</h1>
+                    <span>Cardiology</span>
+                </div>
+            </div>
+
+            <nav class="protocol-top-nav" aria-label="Primary navigation">
+                <a href="#home" class="active">Home</a>
+                <a href="#protocol-about">About Us</a>
+                <a href="#protocol-services">Services</a>
+                <a href="pages/doctors.html">Our Specialists</a>
+                <a href="pages/appointments.html">Patient Guide</a>
+                <a href="pages/organ-donors.html">Organ Donor Tribute</a>
+                <a href="pages/contact.html">Contact Us</a>
+            </nav>
+
+            <div class="protocol-nav-actions">
+                <button type="button" class="protocol-management-btn" data-open-management>Hospital Management</button>
+                <a href="pages/appointments.html" class="protocol-appointment-btn">Appointment</a>
+            </div>
+        </header>
+
+        <section class="protocol-hero-shell">
+            <div class="protocol-hero-content">
+                <p class="protocol-heartline">heartbeat-led cardiac center</p>
+                <h2>Your Heart.<br>Our Protocol.</h2>
+                <p>Advanced cardiac care with precision, compassion, and integrity from consultation to recovery.</p>
+                <div class="protocol-hero-actions">
+                    <a href="pages/appointments.html" class="protocol-cta-primary">Book an Appointment</a>
+                    <a href="pages/doctors.html" class="protocol-cta-ghost">Find a Specialist</a>
+                </div>
+            </div>
+
+            <aside class="protocol-quick-access">
+                <h3>Quick Access</h3>
+                <a href="pages/doctors.html">Find a Doctor</a>
+                <a href="#protocol-services">Our Services</a>
+                <a href="pages/appointments.html">Patient Guide</a>
+                <a href="pages/contact.html">Contact Us</a>
+            </aside>
+        </section>
+
+        <section id="protocol-services" class="protocol-feature-row">
+            <article class="protocol-feature-card reveal-on-scroll" style="--reveal-delay: 0ms;">
+                <h3>Expert Cardiologists</h3>
+                <p>Highly experienced heart specialists for preventive and emergency care.</p>
+            </article>
+            <article class="protocol-feature-card reveal-on-scroll" style="--reveal-delay: 90ms;">
+                <h3>Advanced Technology</h3>
+                <p>State-of-the-art diagnostics and cardiac imaging pathways.</p>
+            </article>
+            <article class="protocol-feature-card reveal-on-scroll" style="--reveal-delay: 180ms;">
+                <h3>Patient-Centered Care</h3>
+                <p>Compassionate treatment from triage to long-term follow-up.</p>
+            </article>
+            <article class="protocol-feature-card reveal-on-scroll" style="--reveal-delay: 270ms;">
+                <h3>Comprehensive Services</h3>
+                <p>From prevention and clinic reviews to high-acuity interventions.</p>
+            </article>
+        </section>
+
+        <section class="protocol-stats-strip">
+            <div><strong>2+</strong><span>Expert Cardiologists</span></div>
+            <div><strong>10,000+</strong><span>Patients Treated</span></div>
+            <div><strong>20+</strong><span>Years of Excellence</span></div>
+            <div><strong>Trusted Care</strong><span>Proven Results</span></div>
+        </section>
+
+        <section class="protocol-family-access" aria-label="Family access signup">
+            <div class="protocol-family-access-inner">
+                <div class="protocol-family-copy">
+                    <p class="protocol-heartline">Family Access</p>
+                    <h2>Track your loved one’s care</h2>
+                    <p>Create a family account using your email and link it to the patient’s registered email to view their updates securely.</p>
+                </div>
+
+                <div class="family-signup-box protocol-family-box">
+                    <h3>Family Member Access</h3>
+                    <form id="familySignupForm">
+                        <div class="form-group">
+                            <label for="signup-name">Your Name</label>
+                            <input type="text" id="signup-name" name="signup-name" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="signup-email">Email</label>
+                            <input type="email" id="signup-email" name="signup-email" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="signup-password">Password</label>
+                            <input type="password" id="signup-password" name="signup-password" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="linked-patient-email">Patient Email</label>
+                            <input type="email" id="linked-patient-email" name="linked-patient-email" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="relationship">Relationship</label>
+                            <input type="text" id="relationship" name="relationship" placeholder="Spouse / Parent / Child" required>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" style="width:100%;">Create Family Account</button>
+                        <div id="signupMessage" class="success-message" style="margin-top:10px;"></div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <section id="protocol-about" class="protocol-about-section">
+            <div class="protocol-about-card reveal-on-scroll">
+                <h2>About The Protocol Cardiology</h2>
+                <p>We combine precision diagnostics, coordinated specialist pathways, and compassionate bedside care to give every patient a confident treatment journey.</p>
+                <div class="protocol-about-actions">
+                    <a href="pages/doctors.html" class="protocol-cta-ghost">Meet Our Specialists</a>
+                    <a href="pages/contact.html" class="protocol-cta-primary">Contact Cardiology Team</a>
+                </div>
+            </div>
+        </section>
+
+        <div id="management-modal" class="protocol-management-modal" aria-hidden="true">
+            <div class="protocol-management-backdrop" data-close-management></div>
+            <section class="protocol-management-panel" role="dialog" aria-modal="true" aria-labelledby="management-title">
+                <button type="button" class="protocol-management-close" data-close-management aria-label="Close management login">×</button>
+                <div class="login-box management-login-box">
+                    <h2 id="management-title">Hospital Management Access</h2>
+                    <p class="subtitle">Doctors, staff, and administrators can securely access the clinical command dashboard.</p>
+
+                    <form id="loginForm">
+                        <div class="form-group">
+                            <label for="username">Username</label>
+                            <input type="text" id="username" name="username" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="password">Password</label>
+                            <input type="password" id="password" name="password" required>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">Login</button>
+                        <div id="errorMessage" class="error-message"></div>
+                    </form>
+
+                    <div class="credentials-panel">
+                        <p><strong>Default Credentials:</strong></p>
+                        <ul>
+                            <li><strong>Doctor:</strong> doctor1 / password123</li>
+                            <li><strong>Staff:</strong> staff1 / password123</li>
+                            <li><strong>Admin:</strong> admin / password123</li>
+                            <li><strong>Patient:</strong> patient1 / password123</li>
+                        </ul>
+                    </div>
+
+                </div>
+            </section>
+        </div>
+
+        <div id="login-success-overlay" class="login-success-overlay">
+            <div class="success-card">
+                <div class="success-icon">✓</div>
+                <h2 class="success-title">Success!</h2>
+                <p class="success-subtitle">Preparing your dashboard...</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

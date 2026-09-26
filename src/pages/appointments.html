@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Appointments - Clinic Appointment System</title>
+    <link rel="stylesheet" href="../css/styles.css">
+    <script src="../js/runtime-config.js?v=20260726c" defer></script>
+    <script src="../js/appointments.js?v=20260726c" defer></script>
+</head>
+<body>
+    <header>
+        <h1>📅 Manage Your Appointments</h1>
+        <nav>
+            <a href="../index.html">Home</a>
+            <a href="appointments.html">Appointments</a>
+            <a href="doctors.html">Doctors</a>
+            <a href="organ-donors.html">Organ Donors</a>
+            <a href="contact.html">Contact</a>
+        </nav>
+    </header>
+    <main class="container">
+        <section id="appointment-list" class="appointment-section">
+            <h2>Your Current Appointments</h2>
+            <p id="appointments-helper" class="muted-text">Appointments are grouped by doctor and specialty schedule.</p>
+            <div id="appointments-container">
+                <!-- Appointment items will be dynamically inserted here -->
+            </div>
+        </section>
+        <section id="appointment-form" class="appointment-section">
+            <h2>Book a New Appointment</h2>
+            <form id="new-appointment-form">
+                <div class="form-group">
+                    <label for="patient-name">Full Name:</label>
+                    <input type="text" id="patient-name" name="patient-name" placeholder="Enter your full name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="patient-email">Email:</label>
+                    <input type="email" id="patient-email" name="patient-email" placeholder="Enter your email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="patient-phone">Phone:</label>
+                    <input type="tel" id="patient-phone" name="patient-phone" placeholder="Enter your phone number" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="appointment-date">Appointment Date:</label>
+                    <input type="date" id="appointment-date" name="appointment-date" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="appointment-time">Appointment Time:</label>
+                    <input type="time" id="appointment-time" name="appointment-time" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="doctor-select">Select Doctor:</label>
+                    <select id="doctor-select" name="doctor-select" required>
+                        <option value="">-- Choose a doctor --</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="doctor-schedule-preview">Doctor Schedule</label>
+                    <input type="text" id="doctor-schedule-preview" value="Select a doctor to view specialty schedule" readonly>
+                </div>
+
+                <div class="availability-panel">
+                    <div class="availability-heading">
+                        <div>
+                            <span class="eyebrow">Live schedule</span>
+                            <h3>Available appointment slots</h3>
+                        </div>
+                        <span id="availability-date-label" class="availability-date-label">Choose a date</span>
+                    </div>
+                    <div id="availability-slots" class="availability-slots">
+                        <p class="muted-text">Choose a doctor and date to view available slots.</p>
+                    </div>
+                </div>
+                
+                <button type="submit" class="button">Book Appointment</button>
+                <p id="appointment-form-status" class="muted-text" style="margin-top: 10px;"></p>
+            </form>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2026 Clinic Appointment System. All rights reserved.</p>
+    </footer>
+</body>
+</html>

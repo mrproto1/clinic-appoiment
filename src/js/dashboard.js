@@ -1,0 +1,2310 @@
+// Dashboard Module
+let ws = null;
+let reconnectAttempts = 0;
+let realtimePollTimer = null;
+let codeBluePollTimer = null;
+let currentDoctorChatPatient = null;
+let liveVitalsTimer = null;
+let doctorRealtimeTimer = null;
+let doctorPatientCache = [];
+let doctorAssignedCache = [];
+let doctorDirectory = [];
+let patientAssignedDoctorId = null;
+let staffPatientCache = [];
+let staffAppointmentCache = [];
+let doctorLeaveCache = [];
+let patientVitalsHistory = [];
+let patientVitalsAlertSignature = '';
+let doctorVitalsHistoryByPatient = {};
+let doctorEcgStateByPatient = {};
+const MAX_RECONNECT_ATTEMPTS = 5;
+const CODE_BLUE_POLL_MS = 1000;
+const MAX_PATIENT_HISTORY_POINTS = 18;
+
+function resolveApiBase() {
+    const runtimeBase = window.APP_RUNTIME_CONFIG && typeof window.APP_RUNTIME_CONFIG.apiBase === 'string'
+        ? window.APP_RUNTIME_CONFIG.apiBase.trim()
+        : '';
+
+    if (runtimeBase !== '') {
+        return runtimeBase.replace(/\/+$/, '');
+    }
+
+    const pathName = window.location.pathname || '/';
+    const apiIndex = pathName.indexOf('/api/');
+
+    if (apiIndex !== -1) {
+        return `${window.location.origin}${pathName.substring(0, apiIndex)}/api`;
+    }
+
+    const segments = pathName.split('/').filter(Boolean);
+    if (!segments.length) {
+        return `${window.location.origin}/api`;
+    }
+
+    const first = segments[0];
+    const rootLikeFolders = ['src', 'pages', 'js', 'css', 'images', 'assets', 'api'];
+
+    if (first.includes('.') || rootLikeFolders.includes(first.toLowerCase())) {
+        return `${window.location.origin}/api`;
+    }
+
+    return `${window.location.origin}/${first}/api`;
+}
+
+const DASHBOARD_API_BASE = resolveApiBase();
+
+// Initialize WebSocket for real-time updates
+function initWebSocket() {
+    if (!isLoggedIn()) return;
+
+    if (realtimePollTimer) {
+        clearInterval(realtimePollTimer);
+    }
+
+    if (codeBluePollTimer) {
+        clearInterval(codeBluePollTimer);
+    }
+
+    // Dedicated fast Code Blue polling for near-instant popup across all dashboards.
+    pollCodeBlueAlerts();
+    codeBluePollTimer = setInterval(async () => {
+        await pollCodeBlueAlerts();
+    }, CODE_BLUE_POLL_MS);
+
+    // XAMPP mode fallback: poll APIs for fresh data instead of WebSocket.
+    realtimePollTimer = setInterval(async () => {
+        await pollCodeBlueAlerts();
+
+        const role = currentUser.role;
+
+        if (role === 'doctor') {
+            await loadDoctorDashboard();
+            return;
+        }
+
+        if (role === 'staff') {
+            await loadStaffDashboard();
+            return;
+        }
+
+        if (role === 'admin') {
+            await loadAdminDashboard();
+            return;
+        }
+
+        if (role === 'patient') {
+            await loadPatientDashboard();
+        }
+    }, 7000);
+}
+
+function getCodeBlueSeenKey() {
+    return `codeBlueSeenAt:${currentUser.id || 'guest'}`;
+}
+
+function getFamilyLinkedPatientContext() {
+    if (!currentUser || currentUser.role !== 'family') {
+        return null;
+    }
+
+    return {
+        patientId: Number(currentUser.linkedPatientId || 0),
+        patientName: String(currentUser.linkedPatientName || '').trim().toLowerCase(),
+        patientEmail: String(currentUser.linkedPatientEmail || currentUser.email || '').trim().toLowerCase()
+    };
+}
+
+function messageMatchesLinkedPatient(message, familyContext) {
+    if (!message || !familyContext) {
+        return true;
+    }
+
+    const metadata = message.metadata || {};
+    const patientId = Number(metadata.patientId || 0);
+    const patientName = String(metadata.patientName || '').trim().toLowerCase();
+    const patientEmail = String(metadata.patientEmail || '').trim().toLowerCase();
+
+    if (familyContext.patientId > 0 && patientId > 0 && familyContext.patientId === patientId) {
+        return true;
+    }
+
+    if (familyContext.patientName && patientName && familyContext.patientName === patientName) {
+        return true;
+    }
+
+    if (familyContext.patientEmail && patientEmail && familyContext.patientEmail === patientEmail) {
+        return true;
+    }
+
+    return false;
+}
+
+async function pollCodeBlueAlerts() {
+    if (!isLoggedIn()) return;
+
+    try {
+        const response = await apiCall('/messages/group/all');
+        if (!response || !response.ok) return;
+
+        const messages = await response.json();
+        if (!Array.isArray(messages) || !messages.length) return;
+
+        const familyContext = getFamilyLinkedPatientContext();
+        const relevantMessages = familyContext
+            ? messages.filter((item) => item && item.type === 'code-blue' && messageMatchesLinkedPatient(item, familyContext))
+            : messages.filter((item) => item && item.type === 'code-blue');
+
+        const latestCodeBlue = [...relevantMessages]
+            .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))[0];
+
+        if (!latestCodeBlue) return;
+
+        const latestTs = new Date(latestCodeBlue.timestamp || 0).getTime();
+        if (!latestTs) return;
+
+        const storageKey = getCodeBlueSeenKey();
+        const seenTs = Number(localStorage.getItem(storageKey) || 0);
+        if (latestTs <= seenTs) return;
+
+        const metadata = latestCodeBlue.metadata || {};
+        const patientLine = metadata.patientName ? `Patient: ${metadata.patientName}` : 'Patient: General emergency';
+        const roomLine = metadata.roomNumber ? `Room: ${metadata.roomNumber}` : 'Room: Not specified';
+        const noteLine = metadata.note ? `Note: ${metadata.note}` : 'Note: Immediate assistance required';
+        const displayMessage = `${latestCodeBlue.content}\n${patientLine} | ${roomLine} | ${noteLine}`;
+
+        showCodeBlueOverlay(displayMessage);
+        showNotification(`🚨 CODE BLUE: ${patientLine} • ${roomLine}`, 'danger');
+        localStorage.setItem(storageKey, String(latestTs));
+    } catch (error) {
+        console.error('Error polling Code Blue alerts:', error);
+    }
+}
+
+// Handle incoming WebSocket messages
+function handleWebSocketMessage(data) {
+    switch (data.type) {
+        case 'patient-updated':
+            updatePatientInUI(data.patient);
+            showNotification(`Patient ${data.patient.name} updated by ${data.updatedBy}`, 'info');
+            break;
+        case 'vitals-updated':
+            updateVitalsInUI(data.patient);
+            showNotification(`Vitals updated for ${data.patient.name}`, 'info');
+            break;
+        case 'severity-updated':
+            showNotification(`🚨 Severity: ${data.patientName} is now ${data.severity}!`, 'warning');
+            refreshPatientList();
+            break;
+        case 'code-blue':
+            showNotification(`🚨 CODE BLUE: ${data.alert.message}`, 'danger');
+            showCodeBlueOverlay(data.alert.message || 'Immediate assistance is required.');
+            break;
+        case 'message':
+            handleNewMessage(data.message);
+            break;
+    }
+}
+
+function appendChatMessage(message, targetId) {
+    const container = document.getElementById(targetId);
+    if (!container) return;
+
+    const sender = message.senderName || 'Unknown';
+    const time = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const messageClass = message.senderId === currentUser.id ? 'chat-bubble outgoing' : 'chat-bubble incoming';
+
+    container.insertAdjacentHTML('beforeend', `
+        <div class="${messageClass}">
+            <div class="chat-sender">${sender}</div>
+            <div class="chat-text">${message.content}</div>
+            <div class="chat-time">${time}</div>
+        </div>
+    `);
+    container.scrollTop = container.scrollHeight;
+}
+
+function handleNewMessage(message) {
+    if (!message) return;
+
+    if (message.groupId === 'doctor') {
+        appendChatMessage(message, 'doctor-chat');
+    }
+
+    if (message.groupId === 'staff') {
+        appendChatMessage(message, 'doctor-staff-chat');
+        appendChatMessage(message, 'staff-chat');
+    }
+
+    if (message.recipientId === currentUser.id || message.senderId === currentUser.id) {
+        appendChatMessage(message, 'patient-chat');
+    }
+}
+
+
+// Show notification
+function showNotification(message, type = 'info') {
+    const container = document.getElementById('notifications-container');
+    if (!container) return;
+
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.innerHTML = `
+        <span>${message}</span>
+        <button class="close-notification">✕</button>
+    `;
+
+    notification.querySelector('.close-notification').addEventListener('click', () => {
+        notification.remove();
+    });
+
+    container.appendChild(notification);
+
+    // Auto-remove after 5 seconds
+    setTimeout(() => notification.remove(), 5000);
+}
+
+// Initialize dashboard
+async function initializeDashboard() {
+    if (!requireAuth()) return;
+
+    const role = new URLSearchParams(window.location.search).get('role') || currentUser.role;
+
+    if (typeof window.showRoleMenu === 'function') {
+        window.showRoleMenu(role);
+    }
+    showDashboardRoleMenu(role);
+
+    // Update user display
+    document.getElementById('user-name').textContent = currentUser.name;
+    document.getElementById('user-role').textContent = currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1);
+
+    updateDashboardHero(currentUser.name, currentUser.role);
+    showRoleBasedSections(role);
+
+    await loadDoctorDirectory();
+
+    // Initialize WebSocket for real-time updates
+    initWebSocket();
+    await pollCodeBlueAlerts();
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            pollCodeBlueAlerts();
+        }
+    });
+
+    // Load initial data
+    switch (role) {
+        case 'doctor':
+            loadDoctorDashboard();
+            break;
+        case 'staff':
+            loadStaffDashboard();
+            break;
+        case 'admin':
+            loadAdminDashboard();
+            break;
+        case 'patient':
+            loadPatientDashboard();
+            break;
+        case 'family':
+            loadFamilyDashboard();
+            break;
+    }
+}
+
+function showDashboardRoleMenu(role) {
+    const menuIds = {
+        doctor: ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5'],
+        staff: ['staff-menu', 'staff-menu-2'],
+        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4'],
+        patient: ['patient-menu', 'patient-menu-2'],
+        family: ['family-menu', 'patient-menu', 'patient-menu-2']
+    };
+
+    Object.values(menuIds).flat().forEach((id) => {
+        const item = document.getElementById(id);
+        if (item) item.style.display = 'list-item';
+    });
+
+    Object.entries(menuIds).forEach(([menuRole, ids]) => {
+        if (menuRole === role) return;
+        ids.forEach((id) => {
+            const item = document.getElementById(id);
+            if (item) item.style.display = 'none';
+        });
+    });
+}
+
+async function loadDoctorDirectory() {
+    try {
+        const response = await apiCall('/users/role/doctor');
+        if (!response || !response.ok) return;
+        doctorDirectory = await response.json();
+        populateDoctorSelect();
+    } catch (error) {
+        console.error('Error loading doctor directory:', error);
+    }
+}
+
+function getDoctorById(doctorId) {
+    return doctorDirectory.find((doctor) => Number(doctor.id) === Number(doctorId));
+}
+
+function getDoctorLabel(doctorId) {
+    const doctor = getDoctorById(doctorId);
+    if (!doctor) return 'Unassigned';
+    return `${doctor.name} (${doctor.department || 'General Medicine'})`;
+}
+
+function getDoctorScheduleEntries(doctor) {
+    const department = (doctor?.department || '').toLowerCase();
+
+    if (department.includes('cardio')) {
+        return [
+            '09:00 - Cardiac clinic rounds and ECG review',
+            '11:00 - Interventional cardiology consults',
+            '14:00 - Post-procedure and hypertension follow-ups'
+        ];
+    }
+
+    if (department.includes('psychiat')) {
+        return [
+            '09:00 - Mental health assessment clinic',
+            '11:30 - Psychiatry consultation sessions',
+            '14:00 - Follow-up and treatment planning reviews'
+        ];
+    }
+
+    if (department.includes('neuro-oph')) {
+        return [
+            '09:00 - Neuro-visual pathway assessment clinic',
+            '11:30 - Optic nerve and diplopia specialist session',
+            '14:00 - Neuro-ophthalmology follow-up reviews'
+        ];
+    }
+
+    if (department.includes('neuro')) {
+        return [
+            '08:00 - Neurosurgery ward review',
+            '10:30 - Brain and spine operative planning',
+            '14:00 - Post-op neurological monitoring rounds'
+        ];
+    }
+
+    if (department.includes('surg')) {
+        return [
+            '08:30 - Surgical pre-op briefing',
+            '11:00 - Theatre supervision and operative block',
+            '15:00 - Surgical follow-up outpatient review'
+        ];
+    }
+
+    return [
+        '09:00 - General specialist assessment',
+        '11:00 - Treatment planning and diagnostics',
+        '14:30 - Follow-up and continuity of care rounds'
+    ];
+}
+
+function populateDoctorSelect() {
+    const doctorSelect = document.getElementById('new-patient-doctor');
+    if (!doctorSelect) return;
+
+    const previousSelection = doctorSelect.value;
+    const renderList = doctorDirectory;
+    doctorSelect.innerHTML = '<option value="">-- Select doctor --</option>' +
+        renderList.map((doctor) => `<option value="${doctor.id}">${doctor.name} (${doctor.department || 'General Medicine'})</option>`).join('');
+
+    if (previousSelection && renderList.some((doctor) => String(doctor.id) === String(previousSelection))) {
+        doctorSelect.value = previousSelection;
+    }
+}
+
+function updateDashboardHero(name, role) {
+    const title = document.getElementById('dashboard-welcome');
+    const detail = document.getElementById('dashboard-welcome-detail');
+    if (!title || !detail) return;
+
+    const formattedRole = role === 'doctor'
+        ? 'Doctor'
+        : role.charAt(0).toUpperCase() + role.slice(1);
+
+    title.textContent = `Welcome back, ${formattedRole}`;
+    detail.textContent = `Good day, ${name}. Your ${formattedRole} dashboard is ready with the latest patient updates.`;
+}
+
+// Show sections based on user role
+function showRoleBasedSections(role) {
+    const sections = document.querySelectorAll('.content-section');
+    sections.forEach(section => section.classList.remove('active'));
+
+    const roleSection = document.getElementById(`${role}-section`);
+    if (roleSection) {
+        roleSection.classList.add('active');
+    }
+}
+
+// DOCTOR DASHBOARD
+async function loadDoctorDashboard() {
+    try {
+        const [assignedRes, messagesRes, appointmentsRes, leavesRes] = await Promise.all([
+            apiCall(`/patients/doctor/${currentUser.id}`),
+            apiCall('/messages/group/doctor'),
+            apiCall(`/appointments/doctor/${currentUser.id}`),
+            apiCall(`/leaves/doctor/${currentUser.id}`)
+        ]);
+
+        if (!assignedRes || !assignedRes.ok) return;
+
+        const assignedPatients = await assignedRes.json();
+        const messages = messagesRes && messagesRes.ok ? await messagesRes.json() : [];
+        const appointments = appointmentsRes && appointmentsRes.ok ? await appointmentsRes.json() : [];
+        const leaves = leavesRes && leavesRes.ok ? await leavesRes.json() : [];
+        const doctorProfile = getDoctorById(currentUser.id) || {
+            name: currentUser.name,
+            department: currentUser.department || 'General Medicine'
+        };
+
+        displayDoctorPatients(assignedPatients);
+        displayDoctorStats(assignedPatients);
+        displayDoctorMessages(messages);
+        displayDoctorAppointments(appointments, doctorProfile);
+        displayDoctorAppointmentCalendar(appointments, 'doctor-appointment-calendar');
+        displayDoctorAppointmentCalendar(appointments, 'doctor-main-appointment-calendar');
+        displayDoctorLeaves(leaves);
+        renderDoctorOperationSchedule(doctorProfile);
+        startLivePatientTelemetry(assignedPatients);
+    } catch (error) {
+        console.error('Error loading doctor dashboard:', error);
+    }
+}
+
+function displayDoctorAppointments(appointments, doctorProfile) {
+    const container = document.getElementById('doctor-appointments-list');
+    if (!container) return;
+
+    if (!appointments || !appointments.length) {
+        const emptyState = '<p class="muted-text">No appointments assigned yet for your doctor account.</p>';
+        container.innerHTML = emptyState;
+        return;
+    }
+
+    const sorted = [...appointments].sort((a, b) => (`${a.date} ${a.time}`).localeCompare(`${b.date} ${b.time}`));
+    container.innerHTML = `
+        <p class="muted-text">${doctorProfile.name} • ${doctorProfile.department || 'Specialist'}</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Patient</th>
+                    <th>Phone</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${sorted.map((item) => `
+                    <tr>
+                        <td>${item.date}</td>
+                        <td>${item.time}</td>
+                        <td>${item.patientName}</td>
+                        <td>${item.patientPhone}</td>
+                        <td>${item.status || 'Scheduled'}</td>
+                        <td><button class="btn btn-small btn-danger" onclick="deleteDoctorAppointment(${item.id})">Delete</button></td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function displayDoctorAppointmentCalendar(appointments, targetId = 'doctor-appointment-calendar') {
+    const container = document.getElementById(targetId);
+    if (!container) return;
+
+    if (!appointments || !appointments.length) {
+        container.innerHTML = '<h3>Appointment calendar</h3><p class="muted-text">No booked patient appointments to show on the calendar.</p>';
+        return;
+    }
+
+    const byDate = appointments.reduce((groups, appointment) => {
+        const date = appointment.date || 'Unknown date';
+        groups[date] = groups[date] || [];
+        groups[date].push(appointment);
+        return groups;
+    }, {});
+
+    container.innerHTML = `
+        <h3>Appointment calendar</h3>
+        <div class="doctor-calendar-grid">
+            ${Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).map(([date, items]) => `
+                <article class="doctor-calendar-day">
+                    <strong>${date}</strong>
+                    ${items.sort((a, b) => (a.time || '').localeCompare(b.time || '')).map((item) => `
+                        <div class="doctor-calendar-entry">
+                            <span>${item.time || '-'}</span>
+                            <span>${item.patientName || 'Patient'}</span>
+                        </div>
+                    `).join('')}
+                </article>
+            `).join('')}
+        </div>
+    `;
+}
+
+function displayDoctorLeaves(leaves) {
+    const container = document.getElementById('doctor-leave-list');
+    if (!container) return;
+    doctorLeaveCache = Array.isArray(leaves) ? leaves : [];
+
+    if (!leaves || !leaves.length) {
+        container.innerHTML = '<p class="muted-text">No leave requests submitted yet.</p>';
+        return;
+    }
+
+    container.innerHTML = [...leaves].reverse().map((leave) => `
+        <div class="leave-row">
+            <div>
+                <strong>${leave.startDate} to ${leave.endDate}</strong>
+                <span>${leave.reason}</span>
+                ${leave.status === 'Approved' ? `<button class="btn btn-small leave-letter-button" onclick="printDoctorLeaveLetter(${leave.id})">Print Approval Letter</button>` : ''}
+            </div>
+            <span class="leave-status leave-status-${String(leave.status || 'Pending').toLowerCase()}">${leave.status || 'Pending'}</span>
+        </div>
+    `).join('');
+}
+
+function printDoctorLeaveLetter(leaveId) {
+    const leave = doctorLeaveCache.find((item) => Number(item.id) === Number(leaveId));
+    if (!leave || leave.status !== 'Approved') {
+        showNotification('The approval letter is available after admin approval.', 'warning');
+        return;
+    }
+
+    const printWindow = window.open('', '_blank', 'width=850,height=900');
+    if (!printWindow) {
+        showNotification('Please allow pop-ups to print the approval letter.', 'warning');
+        return;
+    }
+
+    const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+    }[character]));
+
+    printWindow.document.write(`<!DOCTYPE html>
+        <html><head><title>Leave Approval Letter</title>
+        <style>
+            body { margin: 0; padding: 48px; color: #15353a; font-family: Georgia, serif; background: #fffdf8; }
+            .letter { max-width: 720px; margin: 0 auto; padding: 56px; border: 1px solid #d9c4a8; background: #fffdf8; }
+            .brand { color: #c56f43; font: 700 12px Arial, sans-serif; letter-spacing: 3px; text-transform: uppercase; }
+            h1 { margin: 12px 0 42px; font-size: 34px; font-weight: 500; }
+            .date { text-align: right; color: #71827f; font: 14px Arial, sans-serif; }
+            p { font-size: 17px; line-height: 1.8; }
+            .details { margin: 28px 0; padding: 20px 24px; border-left: 4px solid #c56f43; background: #f4eee5; font: 15px Arial, sans-serif; line-height: 2; }
+            .signature { margin-top: 52px; font: 14px Arial, sans-serif; }
+            .signature strong { display: block; margin-top: 8px; font-size: 17px; color: #15353a; }
+            @media print { body { padding: 0; } .letter { border: 0; } }
+        </style></head><body><main class="letter">
+            <div class="date">Approved: ${escapeHtml(leave.reviewedAt ? new Date(leave.reviewedAt).toLocaleDateString() : new Date().toLocaleDateString())}</div>
+            <div class="brand">The Protocol Cardiology</div>
+            <h1>Leave Approval Letter</h1>
+            <p>Dear Dr. ${escapeHtml((leave.doctorName || '').replace(/^Dr\.\s*/i, ''))},</p>
+            <p>This letter confirms that your leave request has been reviewed and approved by Hospital Administration.</p>
+            <div class="details">
+                <strong>Doctor:</strong> ${escapeHtml(leave.doctorName)}<br>
+                <strong>Leave period:</strong> ${escapeHtml(leave.startDate)} to ${escapeHtml(leave.endDate)}<br>
+                <strong>Reason:</strong> ${escapeHtml(leave.reason)}<br>
+                <strong>Status:</strong> Approved<br>
+                <strong>Approved by:</strong> ${escapeHtml(leave.reviewedBy || 'Hospital Administration')}
+            </div>
+            <p>Please coordinate any patient handover with the clinical team before the approved leave period begins.</p>
+            <div class="signature">Authorised by<strong>${escapeHtml(leave.reviewedBy || 'Hospital Administration')}</strong>The Protocol Hospital Management</div>
+        </main><script>window.onload = function () { window.print(); };</script></body></html>`);
+    printWindow.document.close();
+}
+
+async function submitDoctorLeave(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = {
+        startDate: document.getElementById('leave-start-date').value,
+        endDate: document.getElementById('leave-end-date').value,
+        reason: document.getElementById('leave-reason').value.trim()
+    };
+
+    try {
+        const response = await apiCall('/leaves', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to submit leave request.', 'danger');
+            return;
+        }
+        form.reset();
+        showNotification('Leave request sent to admin for approval.', 'success');
+        await loadDoctorDashboard();
+    } catch (error) {
+        console.error('Error submitting leave request:', error);
+        showNotification('Unable to submit leave request right now.', 'danger');
+    }
+}
+
+async function deleteDoctorAppointment(appointmentId) {
+    const confirmed = window.confirm('Delete this appointment from your doctor list?');
+    if (!confirmed) return;
+
+    try {
+        const response = await apiCall(`/appointments/${appointmentId}`, {
+            method: 'DELETE'
+        });
+
+        if (response && response.ok) {
+            showNotification('Appointment deleted successfully.', 'success');
+            loadDoctorDashboard();
+            return;
+        }
+
+        const errorData = response ? await response.json().catch(() => ({})) : {};
+        showNotification(errorData.error || 'Unable to delete appointment.', 'danger');
+    } catch (error) {
+        console.error('Error deleting appointment:', error);
+        showNotification('Unable to delete appointment right now.', 'danger');
+    }
+}
+
+function renderDoctorOperationSchedule(doctorProfile) {
+    const list = document.getElementById('doctor-operations-list');
+    if (!list) return;
+
+    const entries = getDoctorScheduleEntries(doctorProfile);
+    list.innerHTML = entries.map((entry) => `<li>${entry}</li>`).join('');
+}
+
+function generateLiveVitals(patient) {
+    const severity = (patient?.severity || 'Moderate').toLowerCase();
+    const profiles = {
+        critical: { hr: 122, rr: 24, o2: 91, temp: 38.7 },
+        severe: { hr: 102, rr: 20, o2: 94, temp: 37.9 },
+        moderate: { hr: 84, rr: 17, o2: 96, temp: 37.3 },
+        mild: { hr: 72, rr: 15, o2: 98, temp: 36.9 }
+    };
+
+    const profile = profiles[severity] || profiles.moderate;
+    const history = doctorVitalsHistoryByPatient[patient.id] || [];
+    const previous = history.length ? history[history.length - 1] : null;
+    const previousHr = Number(previous?.heartRate);
+    const previousRr = Number(previous?.respiratoryRate);
+    const previousO2 = Number(previous?.oxygenSaturation);
+    const baseHr = Number.isFinite(previousHr) ? previousHr : profile.hr;
+    const baseRr = Number.isFinite(previousRr) ? previousRr : profile.rr;
+    const baseO2 = Number.isFinite(previousO2) ? previousO2 : profile.o2;
+
+    const heartRate = Math.max(52, Math.min(140, baseHr + Math.round((Math.random() - 0.5) * 8)));
+    const respiratoryRate = Math.max(10, Math.min(30, baseRr + Math.round((Math.random() - 0.5) * 3)));
+    const oxygenSaturation = Math.max(88, Math.min(100, baseO2 + Math.round((Math.random() - 0.5) * 2)));
+    const temperature = Number((profile.temp + (Math.random() - 0.5) * 0.4).toFixed(1));
+    const systolic = Math.max(90, Math.min(180, 100 + Math.round(Math.random() * 40)));
+    const diastolic = Math.max(55, Math.min(110, 62 + Math.round(Math.random() * 28)));
+
+    return {
+        temperature,
+        bloodPressure: `${systolic}/${diastolic}`,
+        heartRate,
+        respiratoryRate,
+        oxygenSaturation,
+        lastUpdated: new Date().toISOString()
+    };
+}
+
+function withResolvedVitals(patient) {
+    const existing = patient?.vitals || {};
+    const hasTelemetry = Number.isFinite(Number(existing.heartRate))
+        && Number.isFinite(Number(existing.respiratoryRate))
+        && Number.isFinite(Number(existing.oxygenSaturation));
+
+    return {
+        ...patient,
+        vitals: hasTelemetry
+            ? {
+                ...existing,
+                lastUpdated: existing.lastUpdated || new Date().toISOString()
+            }
+            : {
+                ...existing,
+                ...generateLiveVitals(patient)
+            }
+    };
+}
+
+function startLivePatientTelemetry(patients) {
+    doctorPatientCache = patients;
+
+    if (liveVitalsTimer) {
+        clearInterval(liveVitalsTimer);
+    }
+
+    startDoctorRealtimeFeed();
+}
+
+function vitalsFeedSignature(patients) {
+    return (patients || []).map((patient) => {
+        const v = patient?.vitals || {};
+        return [
+            patient?.id || 0,
+            patient?.severity || '',
+            v?.temperature ?? '',
+            v?.bloodPressure ?? '',
+            v?.heartRate ?? '',
+            v?.respiratoryRate ?? '',
+            v?.oxygenSaturation ?? '',
+            v?.lastUpdated ?? ''
+        ].join(':');
+    }).join('|');
+}
+
+async function refreshDoctorRealtimePatients() {
+    if (!isLoggedIn() || currentUser.role !== 'doctor') return;
+
+    try {
+        const response = await apiCall(`/patients/doctor/${currentUser.id}`);
+        if (!response || !response.ok) return;
+
+        const latest = await response.json();
+        const resolved = latest.map(withResolvedVitals);
+        const nextSig = vitalsFeedSignature(resolved);
+        const currentSig = vitalsFeedSignature(doctorPatientCache);
+
+        doctorPatientCache = resolved;
+        if (nextSig !== currentSig) {
+            displayDoctorPatients(resolved);
+            displayDoctorStats(resolved);
+            return;
+        }
+
+        // Even when payload is unchanged, keep monitor view moving if values are simulated.
+        displayDoctorPatients(resolved);
+    } catch (error) {
+        console.error('Error refreshing doctor realtime patients:', error);
+    }
+}
+
+function startDoctorRealtimeFeed() {
+    if (doctorRealtimeTimer) {
+        clearInterval(doctorRealtimeTimer);
+    }
+
+    refreshDoctorRealtimePatients();
+    doctorRealtimeTimer = setInterval(refreshDoctorRealtimePatients, 3000);
+}
+
+function displayDoctorPatients(patients) {
+    const container = document.getElementById('doctor-patients');
+    if (!container) return;
+
+    container.innerHTML = patients.map(patient => {
+        const vitals = patient.vitals || {};
+        const hrChart = buildDoctorHrTrendSvg(patient.id, Number(vitals.heartRate));
+        const bpmText = Number.isFinite(Number(vitals.heartRate)) ? `${Number(vitals.heartRate)} bpm` : 'No BPM';
+        return `
+            <div class="card">
+                <div class="patient-header">
+                    <div class="patient-info">
+                        <h3>${patient.name}</h3>
+                        <p><strong>Code:</strong> ${patient.patientCode}</p>
+                        <p><strong>Diagnosis:</strong> ${patient.diagnosis}</p>
+                        <p><strong>Category:</strong> ${patient.sicknessCategory || 'General Medicine'}</p>
+                        <p><strong>Doctor:</strong> ${getDoctorLabel(patient.assignedDoctor)}</p>
+                    </div>
+                    <span class="severity-badge severity-${(patient.severity || 'Moderate').toLowerCase()}">
+                        ${patient.severity || 'Moderate'}
+                    </span>
+                </div>
+                
+                <div class="vitals-grid">
+                    <div class="vital-item">
+                        <div class="label">Temp</div>
+                        <div class="value">${vitals.temperature || '-'}°C</div>
+                    </div>
+                    <div class="vital-item">
+                        <div class="label">BP</div>
+                        <div class="value">${vitals.bloodPressure || '-'}</div>
+                    </div>
+                    <div class="vital-item">
+                        <div class="label">HR</div>
+                        <div class="value">${vitals.heartRate || '-'}</div>
+                    </div>
+                    <div class="vital-item">
+                        <div class="label">RR</div>
+                        <div class="value">${vitals.respiratoryRate || '-'}</div>
+                    </div>
+                    <div class="vital-item">
+                        <div class="label">SpO2</div>
+                        <div class="value">${vitals.oxygenSaturation || '-'}%</div>
+                    </div>
+                </div>
+                <div class="doctor-hr-trend-wrap">
+                    <div class="doctor-hr-trend-header">
+                        <strong>ECG Rhythm Monitor</strong>
+                        <span class="doctor-rhythm-badge ${hrChart.rhythmClass}">${hrChart.rhythmLabel}</span>
+                    </div>
+                    ${hrChart.svg}
+                    <div class="doctor-hr-trend-meta">
+                        <span class="doctor-bpm-value">${bpmText}</span>
+                        <span class="muted-text">Live monitor</span>
+                    </div>
+                </div>
+                <p class="muted-text" style="margin-top: 10px;">Live telemetry updates every 3 seconds • Last update ${new Date(vitals.lastUpdated || new Date()).toLocaleTimeString()}</p>
+                
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-gray);">
+                    <button class="btn btn-small btn-primary" onclick="openPatientDetail(${patient.id})">View Details</button>
+                    <button class="btn btn-small btn-secondary" onclick="openDoctorChat(${patient.id})">Message Staff</button>
+                    <button class="btn btn-small btn-secondary" onclick="printPatientReport(${patient.id})">Print Report</button>
+                    <button class="btn btn-small btn-danger" onclick="deletePatientRecord(${patient.id}, '${(patient.patientCode || '').replace(/'/g, "\\'")}')">Delete</button>
+                    <button class="btn btn-small btn-danger" onclick="openCodeBluePrompt(${patient.id})">Code Blue</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function buildDoctorHrTrendSvg(patientId, heartRate) {
+    if (!doctorVitalsHistoryByPatient[patientId]) {
+        doctorVitalsHistoryByPatient[patientId] = [];
+    }
+
+    const history = doctorVitalsHistoryByPatient[patientId];
+    if (Number.isFinite(heartRate) && heartRate > 0) {
+        history.push({
+            ts: Date.now(),
+            heartRate
+        });
+        if (history.length > 20) {
+            history.splice(0, history.length - 20);
+        }
+    }
+
+    if (!history.length) {
+        return {
+            svg: '<div class="muted-text">Waiting for HR signal...</div>',
+            rhythmLabel: 'No Signal',
+            rhythmClass: 'rhythm-unknown'
+        };
+    }
+
+    const rhythm = getDoctorRhythmStatus(history);
+    const width = 360;
+    const height = 92;
+    const baseline = 58;
+    const bpm = Number.isFinite(heartRate) ? heartRate : Number(history[history.length - 1].heartRate || 75);
+    const beatSpacingBase = Math.max(28, Math.min(64, 72 - ((bpm - 60) * 0.45)));
+
+    if (!doctorEcgStateByPatient[patientId]) {
+        doctorEcgStateByPatient[patientId] = { phase: 0 };
+    }
+
+    const ecgState = doctorEcgStateByPatient[patientId];
+    const scrollSpeed = rhythm.key === 'tachy' ? 9 : rhythm.key === 'brady' ? 5 : 7;
+    ecgState.phase = (ecgState.phase + scrollSpeed) % beatSpacingBase;
+
+    const points = [];
+    let x = -ecgState.phase;
+    while (x <= width + beatSpacingBase) {
+        const jitter = rhythm.key === 'irregular' ? (Math.random() - 0.5) * 10 : 0;
+        const beatSpacing = beatSpacingBase + jitter;
+        const peak = rhythm.key === 'tachy' ? 20 : rhythm.key === 'brady' ? 28 : 24;
+
+        points.push([x, baseline]);
+        points.push([x + 0.12 * beatSpacing, baseline - 2]);
+        points.push([x + 0.18 * beatSpacing, baseline]);
+        points.push([x + 0.30 * beatSpacing, baseline]);
+        points.push([x + 0.34 * beatSpacing, baseline + 5]);
+        points.push([x + 0.37 * beatSpacing, baseline - peak]);
+        points.push([x + 0.41 * beatSpacing, baseline + 8]);
+        points.push([x + 0.48 * beatSpacing, baseline]);
+        points.push([x + 0.66 * beatSpacing, baseline - 5]);
+        points.push([x + 0.76 * beatSpacing, baseline]);
+        points.push([x + beatSpacing, baseline]);
+        x += beatSpacing;
+    }
+
+    const pathData = points
+        .map((pt, index) => `${index === 0 ? 'M' : 'L'}${pt[0].toFixed(2)} ${pt[1].toFixed(2)}`)
+        .join(' ');
+
+    const majorGrid = Array.from({ length: Math.ceil(width / 30) + 1 }, (_, i) => {
+        const gx = i * 30;
+        return `<line x1="${gx}" y1="0" x2="${gx}" y2="${height}" class="grid-major"></line>`;
+    }).join('') + Array.from({ length: Math.ceil(height / 30) + 1 }, (_, i) => {
+        const gy = i * 30;
+        return `<line x1="0" y1="${gy}" x2="${width}" y2="${gy}" class="grid-major"></line>`;
+    }).join('');
+
+    const minorGrid = Array.from({ length: Math.ceil(width / 10) + 1 }, (_, i) => {
+        const gx = i * 10;
+        return `<line x1="${gx}" y1="0" x2="${gx}" y2="${height}" class="grid-minor"></line>`;
+    }).join('') + Array.from({ length: Math.ceil(height / 10) + 1 }, (_, i) => {
+        const gy = i * 10;
+        return `<line x1="0" y1="${gy}" x2="${width}" y2="${gy}" class="grid-minor"></line>`;
+    }).join('');
+
+    const svg = `
+        <svg class="doctor-hr-trend-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="ECG rhythm graph">
+            <rect x="0" y="0" width="${width}" height="${height}" class="ecg-bg"></rect>
+            ${minorGrid}
+            ${majorGrid}
+            <line x1="0" y1="${baseline}" x2="${width}" y2="${baseline}" class="ecg-baseline"></line>
+            <path d="${pathData}" class="ecg-wave"></path>
+        </svg>
+    `;
+
+    return {
+        svg,
+        rhythmLabel: rhythm.label,
+        rhythmClass: `rhythm-${rhythm.key}`
+    };
+}
+
+function getDoctorRhythmStatus(history) {
+    const values = (history || []).map((item) => Number(item.heartRate)).filter((v) => Number.isFinite(v));
+    if (!values.length) {
+        return { key: 'unknown', label: 'No Signal' };
+    }
+
+    const latest = values[values.length - 1];
+    const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+    const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
+    const stdDev = Math.sqrt(variance);
+
+    if (latest > 100) {
+        return { key: 'tachy', label: 'Tachycardia' };
+    }
+
+    if (latest < 60) {
+        return { key: 'brady', label: 'Bradycardia' };
+    }
+
+    if (stdDev >= 8) {
+        return { key: 'irregular', label: 'Irregular' };
+    }
+
+    return { key: 'normal', label: 'Normal' };
+}
+
+function displayDoctorStats(patients) {
+    const critical = patients.filter(p => p.severity === 'Critical').length;
+    const severe = patients.filter(p => p.severity === 'Severe').length;
+    const moderate = patients.filter(p => p.severity === 'Moderate').length;
+
+    const statsHTML = `
+        <div class="stat-card danger">
+            <h4>Critical Patients</h4>
+            <div class="number">${critical}</div>
+        </div>
+        <div class="stat-card warning">
+            <h4>Severe Patients</h4>
+            <div class="number">${severe}</div>
+        </div>
+        <div class="stat-card info">
+            <h4>Moderate Patients</h4>
+            <div class="number">${moderate}</div>
+        </div>
+        <div class="stat-card success">
+            <h4>Total Patients</h4>
+            <div class="number">${patients.length}</div>
+        </div>
+    `;
+
+    const statsContainer = document.getElementById('doctor-stats');
+    if (statsContainer) statsContainer.innerHTML = statsHTML;
+}
+
+function displayDoctorMessages(messages) {
+    const container = document.getElementById('doctor-chat');
+    if (!container) return;
+    container.innerHTML = '';
+
+    (messages || []).forEach(message => appendChatMessage(message, 'doctor-chat'));
+}
+
+async function openPatientDetail(patientId) {
+    try {
+        const response = await apiCall(`/patients/${patientId}`);
+        if (!response || !response.ok) return;
+
+        const patient = await response.json();
+        const detailContainer = document.getElementById('doctor-patient-detail');
+        if (!detailContainer) return;
+
+        detailContainer.innerHTML = `
+            <div class="card">
+                <h3>${patient.name} (${patient.patientCode})</h3>
+                <p><strong>Diagnosis:</strong> ${patient.diagnosis}</p>
+                <p><strong>Assigned Doctor:</strong> ${patient.assignedDoctor || 'Unassigned'}</p>
+                <p><strong>Assigned Staff:</strong> ${patient.assignedStaff || 'Unassigned'}</p>
+                <div class="vitals-grid">
+                    <div class="vital-item"><div class="label">Temperature</div><div class="value">${patient.vitals.temperature || '-'}°C</div></div>
+                    <div class="vital-item"><div class="label">BP</div><div class="value">${patient.vitals.bloodPressure || '-'}</div></div>
+                    <div class="vital-item"><div class="label">HR</div><div class="value">${patient.vitals.heartRate || '-'}</div></div>
+                    <div class="vital-item"><div class="label">RR</div><div class="value">${patient.vitals.respiratoryRate || '-'}</div></div>
+                </div>
+                <p><strong>Last Updated:</strong> ${new Date(patient.vitals.lastUpdated).toLocaleString()}</p>
+                <div class="button-row">
+                    <button class="btn btn-secondary" onclick="switchSection('doctor-section')">Back</button>
+                    <button class="btn btn-primary" onclick="openDoctorChat(${patient.id})">Message Staff</button>
+                    <button class="btn btn-secondary" onclick="printPatientReport(${patient.id})">Print Report</button>
+                </div>
+            </div>
+        `;
+
+        switchSection('doctor-patients-section');
+    } catch (error) {
+        console.error('Error loading patient detail:', error);
+    }
+}
+
+async function printPatientReport(patientId) {
+    try {
+        const response = await apiCall(`/patients/${patientId}`);
+        if (!response || !response.ok) {
+            showNotification('Unable to load patient report data.', 'danger');
+            return;
+        }
+
+        const patient = withResolvedVitals(await response.json());
+        const vitals = patient.vitals || {};
+        const now = new Date();
+        const doctorLabel = `${currentUser.name || 'Doctor'} (${currentUser.department || 'General Medicine'})`;
+        const hrChart = buildDoctorHrTrendSvg(patient.id, Number(vitals.heartRate));
+        const hrHistory = doctorVitalsHistoryByPatient[patient.id] || [];
+        const historyRows = hrHistory.slice(-10).reverse().map((item) => `
+            <tr>
+                <td>${new Date(item.ts).toLocaleTimeString()}</td>
+                <td>${item.heartRate} bpm</td>
+            </tr>
+        `).join('');
+
+        const reportWindow = window.open('', '_blank', 'width=980,height=760');
+        if (!reportWindow) {
+            showNotification('Popup blocked. Please allow popups to print report.', 'warning');
+            return;
+        }
+
+        const reportHtml = `
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8" />
+                <title>Patient Clinical Report</title>
+                <style>
+                    body { font-family: Segoe UI, Arial, sans-serif; color: #0f172a; margin: 24px; }
+                    h1 { margin: 0 0 8px; font-size: 24px; }
+                    .meta { color: #475569; margin-bottom: 18px; }
+                    .panel { border: 1px solid #cbd5e1; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+                    table { width: 100%; border-collapse: collapse; }
+                    th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; }
+                    th { background: #f1f5f9; }
+                    .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #e2e8f0; font-weight: 700; }
+                    .rhythm-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid transparent; }
+                    .rhythm-normal { background: rgba(22, 163, 74, 0.12); color: #166534; border-color: rgba(22, 163, 74, 0.24); }
+                    .rhythm-tachy, .rhythm-brady, .rhythm-irregular { background: rgba(220, 38, 38, 0.12); color: #991b1b; border-color: rgba(220, 38, 38, 0.24); }
+                    .rhythm-unknown { background: rgba(148, 163, 184, 0.12); color: #475569; border-color: rgba(148, 163, 184, 0.24); }
+                    .chart-wrap { border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px; background: #fff; }
+                    .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+                    .doctor-hr-trend-chart { width: 100%; height: 120px; border: 1px solid #dbe5f2; border-radius: 8px; display: block; }
+                    .doctor-hr-trend-chart .ecg-bg { fill: #fffefe; }
+                    .doctor-hr-trend-chart .grid-minor { stroke: rgba(244, 63, 94, 0.07); stroke-width: 0.8; }
+                    .doctor-hr-trend-chart .grid-major { stroke: rgba(244, 63, 94, 0.16); stroke-width: 1; }
+                    .doctor-hr-trend-chart .ecg-baseline { stroke: rgba(239, 68, 68, 0.35); stroke-width: 1; }
+                    .doctor-hr-trend-chart .ecg-wave { fill: none; stroke: #ef4444; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+                    .chart-meta { margin-top: 8px; display: flex; justify-content: space-between; color: #475569; }
+                    .footer { margin-top: 18px; color: #64748b; font-size: 12px; }
+                </style>
+            </head>
+            <body>
+                <h1>Patient Clinical Snapshot Report</h1>
+                <div class="meta">Generated ${now.toLocaleString()} by ${doctorLabel}</div>
+
+                <div class="panel">
+                    <table>
+                        <tr><th>Patient Name</th><td>${patient.name || '-'}</td><th>Patient Code</th><td>${patient.patientCode || '-'}</td></tr>
+                        <tr><th>Diagnosis</th><td>${patient.diagnosis || '-'}</td><th>Severity</th><td><span class="badge">${patient.severity || 'Moderate'}</span></td></tr>
+                        <tr><th>Category</th><td>${patient.sicknessCategory || 'General Medicine'}</td><th>Admitted Date</th><td>${patient.admittedDate || '-'}</td></tr>
+                    </table>
+                </div>
+
+                <div class="panel">
+                    <h3>Latest Vitals</h3>
+                    <table>
+                        <tr><th>Temperature</th><td>${vitals.temperature ?? '-'} °C</td></tr>
+                        <tr><th>Blood Pressure</th><td>${vitals.bloodPressure ?? '-'}</td></tr>
+                        <tr><th>Heart Rate</th><td>${vitals.heartRate ?? '-'} bpm</td></tr>
+                        <tr><th>Respiratory Rate</th><td>${vitals.respiratoryRate ?? '-'} /min</td></tr>
+                        <tr><th>SpO2</th><td>${vitals.oxygenSaturation ?? '-'} %</td></tr>
+                        <tr><th>Last Updated</th><td>${vitals.lastUpdated ? new Date(vitals.lastUpdated).toLocaleString() : '-'}</td></tr>
+                    </table>
+                </div>
+
+                <div class="panel">
+                    <h3>ECG Rhythm Trend</h3>
+                    <div class="chart-wrap">
+                        <div class="chart-head">
+                            <strong>Heart Rhythm Strip</strong>
+                            <span class="rhythm-badge ${hrChart.rhythmClass.replace('doctor-rhythm-badge ', '')}">${hrChart.rhythmLabel}</span>
+                        </div>
+                        ${hrChart.svg}
+                        <div class="chart-meta">
+                            <span><strong>${vitals.heartRate ?? '-'} bpm</strong></span>
+                            <span>Printed ${now.toLocaleTimeString()}</span>
+                        </div>
+                    </div>
+                    <table style="margin-top: 10px;">
+                        <thead>
+                            <tr><th>Sample Time</th><th>Heart Rate</th></tr>
+                        </thead>
+                        <tbody>
+                            ${historyRows || '<tr><td colspan="2">No trend samples available yet.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="panel">
+                    <h3>Doctor Notes</h3>
+                    <p>${patient.notes ? String(patient.notes) : 'No notes available.'}</p>
+                </div>
+
+                <div class="footer">Hospital Management System • Clinical Report</div>
+                <script>window.onload = () => { window.print(); };</script>
+            </body>
+            </html>
+        `;
+
+        reportWindow.document.open();
+        reportWindow.document.write(reportHtml);
+        reportWindow.document.close();
+    } catch (error) {
+        console.error('Error printing patient report:', error);
+        showNotification('Unable to print patient report right now.', 'danger');
+    }
+}
+
+async function openDoctorChat(patientId) {
+    try {
+        const response = await apiCall(`/patients/${patientId}`);
+        if (!response || !response.ok) return;
+
+        currentDoctorChatPatient = await response.json();
+        const messageInput = document.getElementById('doctor-staff-message-input');
+        if (messageInput) {
+            messageInput.placeholder = `Message nursing staff about ${currentDoctorChatPatient.name}...`;
+        }
+
+        switchSection('doctor-staff-section');
+    } catch (error) {
+        console.error('Error opening doctor chat:', error);
+    }
+}
+
+async function sendDoctorMessage() {
+    const input = document.getElementById('doctor-message-input');
+    if (!input) return;
+    const content = input.value.trim();
+    if (!content) return;
+
+    try {
+        const response = await apiCall('/messages/group/doctor', {
+            method: 'POST',
+            body: JSON.stringify({ content })
+        });
+
+        if (!response || !response.ok) {
+            showNotification('Unable to send doctor message.', 'danger');
+            return;
+        }
+
+        const data = await response.json();
+        appendChatMessage(data.data, 'doctor-chat');
+        input.value = '';
+        showNotification('Message sent to doctor team.', 'success');
+    } catch (error) {
+        console.error('Error sending doctor message:', error);
+        showNotification('Unable to send doctor message.', 'danger');
+    }
+}
+
+async function sendDoctorToStaffMessage() {
+    const input = document.getElementById('doctor-staff-message-input');
+    if (!input) return;
+    let content = input.value.trim();
+    if (!content) return;
+
+    if (currentDoctorChatPatient) {
+        content = `Patient ${currentDoctorChatPatient.name} (${currentDoctorChatPatient.patientCode}): ${content}`;
+    }
+
+    try {
+        const response = await apiCall('/messages/group/staff', {
+            method: 'POST',
+            body: JSON.stringify({ content })
+        });
+
+        if (!response || !response.ok) {
+            showNotification('Unable to send nursing team message.', 'danger');
+            return;
+        }
+
+        const data = await response.json();
+        appendChatMessage(data.data, 'doctor-staff-chat');
+        input.value = '';
+        showNotification('Message sent to nursing team.', 'success');
+    } catch (error) {
+        console.error('Error sending doctor to staff message:', error);
+        showNotification('Unable to send nursing team message.', 'danger');
+    }
+}
+
+async function openPatientMessages() {
+    switchSection('patient-messages-section');
+    const container = document.getElementById('patient-chat');
+    if (!container) return;
+
+    if (!patientAssignedDoctorId) {
+        container.innerHTML = '<p class="muted-text">No doctor is assigned to your patient record yet.</p>';
+        return;
+    }
+
+    try {
+        const response = await apiCall(`/messages/conversation/${patientAssignedDoctorId}`);
+        if (!response || !response.ok) {
+            container.innerHTML = '<p class="muted-text">Unable to load your doctor messages.</p>';
+            return;
+        }
+
+        const messages = await response.json();
+        container.innerHTML = '';
+        if (!Array.isArray(messages) || messages.length === 0) {
+            container.innerHTML = '<p class="muted-text">No messages yet. Send a message to your doctor.</p>';
+            return;
+        }
+
+        messages.forEach((message) => appendChatMessage(message, 'patient-chat'));
+    } catch (error) {
+        console.error('Error loading patient conversation:', error);
+        container.innerHTML = '<p class="muted-text">Unable to load your doctor messages.</p>';
+    }
+}
+
+async function sendPatientMessage() {
+    const input = document.getElementById('patient-message-input');
+    if (!input) return;
+
+    const content = input.value.trim();
+    if (!content) return;
+
+    if (!patientAssignedDoctorId) {
+        showNotification('No assigned doctor found for this patient.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await apiCall('/messages', {
+            method: 'POST',
+            body: JSON.stringify({
+                content,
+                recipientId: patientAssignedDoctorId,
+                type: 'patient-doctor'
+            })
+        });
+
+        if (!response || !response.ok) {
+            const errorData = response ? await response.json().catch(() => ({})) : {};
+            showNotification(errorData.error || 'Unable to send message to doctor.', 'danger');
+            return;
+        }
+
+        const data = await response.json();
+        appendChatMessage(data.data, 'patient-chat');
+        input.value = '';
+        showNotification('Message sent to your doctor.', 'success');
+    } catch (error) {
+        console.error('Error sending patient message:', error);
+        showNotification('Unable to send message to doctor.', 'danger');
+    }
+}
+
+function openCodeBluePrompt(patientId = null) {
+    const modal = document.getElementById('code-blue-modal');
+    if (!modal) return;
+
+    modal.classList.add('show');
+    modal.dataset.patientId = patientId || '';
+    const patientSelect = document.getElementById('code-blue-patient');
+    const roomInput = document.getElementById('code-blue-room');
+
+    if (patientSelect) {
+        if (!staffPatientCache.length) {
+            apiCall('/patients')
+                .then((response) => (response && response.ok ? response.json() : []))
+                .then((patients) => {
+                    if (Array.isArray(patients)) {
+                        staffPatientCache = patients;
+                        populateCodeBluePatientOptions(staffPatientCache);
+                        patientSelect.value = patientId ? String(patientId) : '';
+                    }
+                })
+                .catch((error) => {
+                    console.error('Unable to load patient list for Code Blue:', error);
+                });
+        } else {
+            populateCodeBluePatientOptions(staffPatientCache);
+            patientSelect.value = patientId ? String(patientId) : '';
+        }
+    }
+
+    if (roomInput) {
+        roomInput.value = '';
+    }
+
+    document.getElementById('code-blue-note').value = patientId ? `Urgent assistance for patient ID ${patientId}` : '';
+}
+
+async function submitCodeBlue() {
+    const modal = document.getElementById('code-blue-modal');
+    if (!modal) return;
+    const patientSelect = document.getElementById('code-blue-patient');
+    const selectedPatientId = patientSelect && patientSelect.value ? parseInt(patientSelect.value) : null;
+    const patientId = selectedPatientId || (modal.dataset.patientId ? parseInt(modal.dataset.patientId) : null);
+    const roomNumber = document.getElementById('code-blue-room').value.trim();
+    const note = document.getElementById('code-blue-note').value.trim();
+    const selectedPatient = (staffPatientCache || []).find((patient) => Number(patient.id) === Number(patientId));
+
+    try {
+        const response = await apiCall('/patients/code-blue', {
+            method: 'POST',
+            body: JSON.stringify({
+                patientId: patientId || null,
+                roomNumber: roomNumber || null,
+                note,
+                patientName: selectedPatient ? selectedPatient.name : null
+            })
+        });
+
+        if (response && response.ok) {
+            const patientLabel = selectedPatient ? selectedPatient.name : 'General emergency';
+            const roomLabel = roomNumber || 'Room not specified';
+            const message = `CODE BLUE • Patient: ${patientLabel} • Room: ${roomLabel}${note ? ` • Note: ${note}` : ''}`;
+            showNotification('Code Blue alert sent to all clinical teams.', 'danger');
+            showCodeBlueOverlay(message);
+            closeModal('code-blue-modal');
+        }
+    } catch (error) {
+        console.error('Error sending Code Blue:', error);
+        showNotification('Failed to send Code Blue alert.', 'danger');
+    }
+}
+
+// STAFF DASHBOARD
+async function loadStaffDashboard() {
+    try {
+        if (!doctorDirectory.length) {
+            await loadDoctorDirectory();
+        }
+
+        const [patientsRes, messagesRes, appointmentsRes] = await Promise.all([
+            apiCall('/patients'),
+            apiCall('/messages/group/staff'),
+            apiCall('/appointments')
+        ]);
+
+        const patients = patientsRes && patientsRes.ok ? await patientsRes.json() : staffPatientCache;
+        staffPatientCache = Array.isArray(patients) ? patients : [];
+        populateCodeBluePatientOptions(staffPatientCache);
+        const messages = messagesRes && messagesRes.ok ? await messagesRes.json() : [];
+        const appointments = appointmentsRes && appointmentsRes.ok ? await appointmentsRes.json() : [];
+        staffAppointmentCache = Array.isArray(appointments) ? appointments : [];
+
+        displayStaffPatients(staffPatientCache);
+        displayStaffStats(staffPatientCache, staffAppointmentCache);
+        displayStaffMessages(messages);
+        displayStaffAppointments(staffAppointmentCache);
+
+        if ((!patientsRes || !patientsRes.ok) && appointmentsRes && appointmentsRes.ok) {
+            showNotification('Patients API unavailable, showing appointments only.', 'warning');
+        }
+    } catch (error) {
+        console.error('Error loading staff dashboard:', error);
+    }
+}
+
+function populateCodeBluePatientOptions(patients = []) {
+    const select = document.getElementById('code-blue-patient');
+    if (!select) return;
+
+    const previousValue = select.value;
+    select.innerHTML = '<option value="">-- General Emergency (No Specific Patient) --</option>' +
+        patients.map((patient) => `<option value="${patient.id}">${patient.patientCode} - ${patient.name}</option>`).join('');
+
+    if (previousValue && patients.some((patient) => String(patient.id) === String(previousValue))) {
+        select.value = previousValue;
+    }
+}
+
+function displayStaffMessages(messages) {
+    const container = document.getElementById('staff-chat');
+    if (!container) return;
+
+    container.innerHTML = '';
+    (messages || []).forEach(message => appendChatMessage(message, 'staff-chat'));
+}
+
+function displayStaffAppointments(appointments) {
+    const container = document.getElementById('staff-appointments');
+    if (!container) return;
+
+    const sorted = [...(appointments || [])].sort((a, b) => (`${a.date} ${a.time}`).localeCompare(`${b.date} ${b.time}`));
+
+    if (!sorted.length) {
+        container.innerHTML = '<p class="muted-text">No appointment requests yet.</p>';
+        return;
+    }
+
+    container.innerHTML = `
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Patient</th>
+                    <th>Phone</th>
+                    <th>Doctor</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${sorted.map((appointment) => `
+                    <tr>
+                        <td>${appointment.date || '-'}</td>
+                        <td>${appointment.time || '-'}</td>
+                        <td>${appointment.patientName || '-'}</td>
+                        <td>${appointment.patientPhone || '-'}</td>
+                        <td>${appointment.doctorName || getDoctorLabel(appointment.doctorId)}</td>
+                        <td><span class="severity-badge severity-moderate">${appointment.status || 'Scheduled'}</span></td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+async function sendStaffTeamMessage() {
+    const input = document.getElementById('staff-message-input');
+    if (!input) return;
+    const content = input.value.trim();
+    if (!content) return;
+
+    try {
+        const response = await apiCall('/messages/group/staff', {
+            method: 'POST',
+            body: JSON.stringify({ content })
+        });
+
+        if (!response || !response.ok) return;
+
+        const data = await response.json();
+        appendChatMessage(data.data, 'staff-chat');
+        input.value = '';
+    } catch (error) {
+        console.error('Error sending staff team message:', error);
+    }
+}
+
+function displayStaffPatients(patients) {
+    const container = document.getElementById('staff-patients');
+    if (!container) return;
+
+    const html = `
+        <table>
+            <thead>
+                <tr>
+                    <th>Patient Code</th>
+                    <th>Name</th>
+                    <th>Category</th>
+                    <th>Diagnosis</th>
+                    <th>Doctor In Charge</th>
+                    <th>Severity</th>
+                    <th>Temperature</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${patients.map(p => `
+                    <tr>
+                        <td>${p.patientCode}</td>
+                        <td>${p.name}</td>
+                        <td>${p.sicknessCategory || '-'}</td>
+                        <td>${p.diagnosis}</td>
+                        <td>${getDoctorLabel(p.assignedDoctor)}</td>
+                        <td><span class="severity-badge severity-${p.severity.toLowerCase()}">${p.severity}</span></td>
+                        <td>${p.vitals.temperature || '-'}°C</td>
+                        <td>
+                            <button class="btn btn-small btn-primary" onclick="updateVitalsModal(${p.id})">Update Vitals</button>
+                            <button class="btn btn-small btn-danger" onclick="deletePatientRecord(${p.id}, '${(p.patientCode || '').replace(/'/g, "\\'")}')">Delete</button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+    container.innerHTML = html;
+}
+
+function displayStaffStats(patients, appointments = []) {
+    const byDepartment = patients.reduce((acc, p) => {
+        acc[p.department || 'General'] = (acc[p.department || 'General'] || 0) + 1;
+        return acc;
+    }, {});
+
+    const statsContainer = document.getElementById('staff-stats');
+    if (statsContainer) {
+        const appointmentStats = `
+            <div class="stat-card info">
+                <h4>Total Appointments</h4>
+                <div class="number">${appointments.length}</div>
+            </div>
+            <div class="stat-card warning">
+                <h4>Scheduled</h4>
+                <div class="number">${appointments.filter((item) => item.status === 'Scheduled').length}</div>
+            </div>
+        `;
+        statsContainer.innerHTML = appointmentStats + Object.entries(byDepartment).map(([dept, count]) => `
+            <div class="stat-card">
+                <h4>${dept}</h4>
+                <div class="number">${count}</div>
+            </div>
+        `).join('');
+    }
+}
+
+// ADMIN DASHBOARD
+async function loadAdminDashboard() {
+    try {
+        const [patientsRes, usersRes, appointmentsRes, leavesRes] = await Promise.all([
+            apiCall('/patients'),
+            apiCall('/users'),
+            apiCall('/appointments'),
+            apiCall('/leaves')
+        ]);
+
+        if (!patientsRes || !patientsRes.ok || !usersRes || !usersRes.ok) return;
+
+        const patients = await patientsRes.json();
+        const users = await usersRes.json();
+        const appointments = appointmentsRes && appointmentsRes.ok ? await appointmentsRes.json() : [];
+        const leaves = leavesRes && leavesRes.ok ? await leavesRes.json() : [];
+
+        displayAdminStats(patients, users, appointments, leaves);
+        displayAdminUsers(users);
+        displayAdminPatients(patients);
+        displayAdminOverviewPatients(patients);
+        displayAdminOverviewAppointments(appointments, users);
+        displayAdminLeaves(leaves);
+    } catch (error) {
+        console.error('Error loading admin dashboard:', error);
+    }
+}
+
+function displayAdminStats(patients, users, appointments = [], leaves = []) {
+    const statsHTML = `
+        <div class="stat-card info">
+            <h4>Total Patients</h4>
+            <div class="number">${patients.length}</div>
+        </div>
+        <div class="stat-card info">
+            <h4>Total Users</h4>
+            <div class="number">${users.length}</div>
+        </div>
+        <div class="stat-card">
+            <h4>Doctors</h4>
+            <div class="number">${users.filter(u => u.role === 'doctor').length}</div>
+        </div>
+        <div class="stat-card">
+            <h4>Staff</h4>
+            <div class="number">${users.filter(u => u.role === 'staff').length}</div>
+        </div>
+        <div class="stat-card success">
+            <h4>Appointments</h4>
+            <div class="number">${appointments.length}</div>
+        </div>
+        <div class="stat-card warning">
+            <h4>Pending Leave</h4>
+            <div class="number">${leaves.filter((leave) => leave.status === 'Pending').length}</div>
+        </div>
+    `;
+
+    const statsContainer = document.getElementById('admin-stats');
+    if (statsContainer) statsContainer.innerHTML = statsHTML;
+}
+
+function displayAdminLeaves(leaves) {
+    const container = document.getElementById('admin-leave-requests');
+    const summary = document.getElementById('admin-leave-summary');
+    const pending = leaves.filter((leave) => leave.status === 'Pending');
+
+    if (summary) {
+        summary.innerHTML = pending.length
+            ? `<strong>${pending.length}</strong> leave request${pending.length === 1 ? '' : 's'} waiting for approval.`
+            : '<span class="muted-text">No leave requests are waiting for approval.</span>';
+    }
+    if (!container) return;
+    if (!leaves.length) {
+        container.innerHTML = '<p class="muted-text">No doctor leave requests yet.</p>';
+        return;
+    }
+
+    container.innerHTML = [...leaves].reverse().map((leave) => `
+        <div class="leave-row admin-leave-row">
+            <div>
+                <strong>${leave.doctorName || 'Doctor'}: ${leave.startDate} to ${leave.endDate}</strong>
+                <span>${leave.reason}</span>
+                <small>${leave.status || 'Pending'}${leave.reviewedBy ? ` by ${leave.reviewedBy}` : ''}</small>
+            </div>
+            ${leave.status === 'Pending' ? `
+                <div class="leave-actions">
+                    <button class="btn btn-small btn-success" onclick="reviewDoctorLeave(${leave.id}, 'Approved')">Approve</button>
+                    <button class="btn btn-small btn-danger" onclick="reviewDoctorLeave(${leave.id}, 'Rejected')">Reject</button>
+                </div>
+            ` : `<span class="leave-status leave-status-${String(leave.status).toLowerCase()}">${leave.status}</span>`}
+        </div>
+    `).join('');
+}
+
+function displayAdminOverviewPatients(patients) {
+    const container = document.getElementById('admin-overview-patients');
+    if (!container) return;
+    if (!patients.length) {
+        container.innerHTML = '<p class="muted-text">No patient records found.</p>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="admin-overview-table-wrap">
+            <table class="admin-patient-overview-table">
+                <thead><tr><th>Patient</th><th>Age / Gender / Blood</th><th>Contact</th><th>Address</th><th>Category</th><th>Diagnosis</th><th>Severity</th><th>Assigned Doctor</th></tr></thead>
+                <tbody>${patients.map((patient) => `
+                    <tr>
+                        <td><strong>${patient.name || '-'}</strong><br><small>${patient.patientCode || 'No code'}</small></td>
+                        <td>${patient.age || '-'} / ${patient.gender || '-'} / ${patient.bloodType || '-'}</td>
+                        <td>${patient.email || '-'}<br>${patient.phone || '-'}</td>
+                        <td>${patient.address || '-'}</td>
+                        <td>${patient.sicknessCategory || patient.department || '-'}</td>
+                        <td>${patient.diagnosis || '-'}</td>
+                        <td>${patient.severity || '-'}</td>
+                        <td>${getDoctorLabel(patient.assignedDoctor)}</td>
+                    </tr>
+                `).join('')}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function displayAdminOverviewAppointments(appointments, users) {
+    const container = document.getElementById('admin-overview-appointments');
+    if (!container) return;
+    if (!appointments.length) {
+        container.innerHTML = '<p class="muted-text">No booked appointments found.</p>';
+        return;
+    }
+
+    const doctorNameById = users.reduce((map, user) => {
+        if (user.role === 'doctor') map[user.id] = user.name;
+        return map;
+    }, {});
+
+    const sorted = [...appointments].sort((a, b) => (`${a.date} ${a.time}`).localeCompare(`${b.date} ${b.time}`));
+    container.innerHTML = `
+        <div class="admin-overview-table-wrap">
+            <table>
+                <thead><tr><th>Date</th><th>Time</th><th>Patient</th><th>Patient Contact</th><th>Doctor</th><th>Status</th></tr></thead>
+                <tbody>${sorted.map((appointment) => `
+                    <tr>
+                        <td>${appointment.date || '-'}</td>
+                        <td>${appointment.time || '-'}</td>
+                        <td>${appointment.patientName || '-'}</td>
+                        <td>${appointment.patientEmail || '-'}<br>${appointment.patientPhone || '-'}</td>
+                        <td>${appointment.doctorName || doctorNameById[appointment.doctorId] || 'Doctor'}</td>
+                        <td>${appointment.status || 'Scheduled'}</td>
+                    </tr>
+                `).join('')}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+async function reviewDoctorLeave(leaveId, status) {
+    try {
+        const response = await apiCall(`/leaves/${leaveId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status })
+        });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to update leave request.', 'danger');
+            return;
+        }
+        showNotification(`Leave request ${status.toLowerCase()}.`, 'success');
+        await loadAdminDashboard();
+    } catch (error) {
+        console.error('Error reviewing leave request:', error);
+        showNotification('Unable to review leave request right now.', 'danger');
+    }
+}
+
+function displayAdminUsers(users) {
+    const container = document.getElementById('admin-users');
+    if (!container) return;
+
+    const html = `
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Username</th>
+                    <th>Role</th>
+                    <th>Email</th>
+                    <th>Department</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${users.map(u => `
+                    <tr>
+                        <td>${u.name}</td>
+                        <td>${u.username}</td>
+                        <td>${u.role}</td>
+                        <td>${u.email}</td>
+                        <td>${u.department || '-'}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+    container.innerHTML = html;
+}
+
+function displayAdminPatients(patients) {
+    const container = document.getElementById('admin-patients');
+    if (!container) return;
+
+    const html = `
+        <table>
+            <thead>
+                <tr>
+                    <th>Patient Code</th>
+                    <th>Name</th>
+                    <th>Diagnosis</th>
+                    <th>Severity</th>
+                    <th>Admitted Date</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${patients.map(p => `
+                    <tr>
+                        <td>${p.patientCode}</td>
+                        <td>${p.name}</td>
+                        <td>${p.diagnosis}</td>
+                        <td><span class="severity-badge severity-${p.severity.toLowerCase()}">${p.severity}</span></td>
+                        <td>${new Date(p.admittedDate).toLocaleDateString()}</td>
+                        <td>
+                            <button class="btn btn-small btn-danger" onclick="deletePatientRecord(${p.id}, '${(p.patientCode || '').replace(/'/g, "\\'")}')">Delete</button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+    container.innerHTML = html;
+}
+
+async function deletePatientRecord(patientId, patientCode) {
+    const label = patientCode || `ID ${patientId}`;
+    const confirmed = window.confirm(`Delete patient ${label}? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+        const response = await apiCall(`/patients/${patientId}`, {
+            method: 'DELETE'
+        });
+
+        if (response && response.ok) {
+            showNotification(`Patient ${label} deleted successfully.`, 'success');
+            refreshPatientList();
+            return;
+        }
+
+        const errorData = response ? await response.json().catch(() => ({})) : {};
+        showNotification(errorData.error || 'Unable to delete patient.', 'danger');
+    } catch (error) {
+        console.error('Error deleting patient:', error);
+        showNotification('Unable to delete patient right now.', 'danger');
+    }
+}
+
+// PATIENT DASHBOARD
+async function loadPatientDashboard() {
+    const container = document.getElementById('patient-content');
+    if (!container) return;
+
+    try {
+        const response = await apiCall('/patients/me');
+        if (!response || !response.ok) {
+            container.innerHTML = `
+                <div class="card">
+                    <h3>Your Medical Information</h3>
+                    <p class="muted-text">Patient profile not linked yet. Please ask staff to update your patient record email.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const patient = await response.json();
+        patientAssignedDoctorId = Number(patient.assignedDoctor) || null;
+        renderPatientHealthPanel(patient);
+    } catch (error) {
+        console.error('Error loading patient dashboard:', error);
+        container.innerHTML = `
+            <div class="card">
+                <h3>Your Medical Information</h3>
+                <p class="muted-text">Unable to load your live vitals right now.</p>
+            </div>
+        `;
+    }
+}
+
+async function loadFamilyDashboard() {
+    const container = document.getElementById('family-content');
+    if (!container) return;
+
+    try {
+        const response = await apiCall('/patients/me');
+        if (!response || !response.ok) {
+            container.innerHTML = `
+                <div class="card">
+                    <h3>Family Patient Information</h3>
+                    <p class="muted-text">This family profile is not linked to a patient record yet. Please ensure the patient email is registered correctly.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const patient = await response.json();
+        patientAssignedDoctorId = Number(patient.assignedDoctor) || null;
+        renderPatientHealthPanel(patient, 'family-content');
+    } catch (error) {
+        console.error('Error loading family dashboard:', error);
+        container.innerHTML = `
+            <div class="card">
+                <h3>Family Patient Information</h3>
+                <p class="muted-text">Unable to load the patient information right now.</p>
+            </div>
+        `;
+    }
+}
+
+function buildPatientHeartRateHistory(patient) {
+    const severity = (patient?.severity || 'Moderate').toLowerCase();
+    const baselineMap = {
+        critical: 108,
+        severe: 96,
+        moderate: 82,
+        mild: 72
+    };
+
+    const baseline = Number(patient?.vitals?.heartRate) || baselineMap[severity] || 82;
+    const pattern = [
+        baseline - 10,
+        baseline - 6,
+        baseline - 2,
+        baseline + 4,
+        baseline + 2,
+        baseline,
+        baseline - 3,
+        baseline + 5,
+        baseline + 1,
+        baseline
+    ];
+
+    return pattern.map((value, index) => ({
+        ts: Date.now() - (pattern.length - index) * 1800,
+        heartRate: Math.max(50, Math.min(120, Math.round(value))),
+        respiratoryRate: Number(patient?.vitals?.respiratoryRate) || 16 + (index % 3),
+        oxygenSaturation: Number(patient?.vitals?.oxygenSaturation) || 97,
+        bloodPressure: patient?.vitals?.bloodPressure || '120/80'
+    }));
+}
+
+function renderPatientHealthPanel(patient, targetId = 'patient-content') {
+    const container = document.getElementById(targetId);
+    if (!container) return;
+
+    const vitals = patient?.vitals || {};
+    const severity = patient?.severity || 'Moderate';
+    const doctorName = getDoctorLabel(patient?.assignedDoctor);
+    const updatedAt = vitals.lastUpdated ? new Date(vitals.lastUpdated) : new Date();
+    patientVitalsHistory = buildPatientHeartRateHistory(patient);
+
+    container.innerHTML = `
+        <div class="card patient-monitor-card">
+            <div class="patient-monitor-head">
+                <div>
+                    <h3>${patient.name} (${patient.patientCode || 'N/A'})</h3>
+                    <p><strong>Diagnosis:</strong> ${patient.diagnosis || '-'}</p>
+                    <p><strong>Doctor In Charge:</strong> ${doctorName}</p>
+                </div>
+                <span class="severity-badge severity-${severity.toLowerCase()}">${severity}</span>
+            </div>
+
+            <div id="patient-vitals-alerts" class="patient-alert-stack"></div>
+
+            <div class="vitals-grid">
+                <div class="vital-item"><div class="label">Heart Rate</div><div class="value">${vitals.heartRate ?? '-'} bpm</div></div>
+                <div class="vital-item"><div class="label">Respiratory</div><div class="value">${vitals.respiratoryRate ?? '-'} /min</div></div>
+                <div class="vital-item"><div class="label">SpO2</div><div class="value">${vitals.oxygenSaturation ?? '-'}%</div></div>
+                <div class="vital-item"><div class="label">Blood Pressure</div><div class="value">${vitals.bloodPressure ?? '-'}</div></div>
+                <div class="vital-item"><div class="label">Temperature</div><div class="value">${vitals.temperature ?? '-'}°C</div></div>
+            </div>
+
+            <div class="patient-hr-chart-wrap">
+                <div class="chart-header-row">
+                    <h4>Heart Rate Trend</h4>
+                    <span class="muted-text">Updated ${updatedAt.toLocaleTimeString()}</span>
+                </div>
+                <canvas id="patient-hr-chart" width="860" height="220" aria-label="Heart rate trend chart"></canvas>
+                <div class="chart-legend-inline">
+                    <span><i class="legend-dot hr"></i>Heart Rate</span>
+                    <span><i class="legend-dot safe"></i>Normal Band (60-100 bpm)</span>
+                    <span><i class="legend-dot danger"></i>Critical Thresholds (&lt;50 / &gt;120)</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    if (vitals.heartRate) {
+        patientVitalsHistory = [{
+            ts: Date.now(),
+            heartRate: Number(vitals.heartRate),
+            respiratoryRate: Number(vitals.respiratoryRate) || 16,
+            oxygenSaturation: Number(vitals.oxygenSaturation) || 97,
+            bloodPressure: String(vitals.bloodPressure || '120/80')
+        }, ...patientVitalsHistory.slice(0, MAX_PATIENT_HISTORY_POINTS - 1)];
+    }
+
+    renderPatientHrChart();
+    renderPatientVitalAlerts(vitals);
+}
+
+function pushPatientVitalsHistory(vitals) {
+    const hr = Number(vitals?.heartRate);
+    if (!Number.isFinite(hr)) return;
+
+    const sample = {
+        ts: Date.now(),
+        heartRate: hr,
+        respiratoryRate: Number(vitals?.respiratoryRate),
+        oxygenSaturation: Number(vitals?.oxygenSaturation),
+        bloodPressure: String(vitals?.bloodPressure || '')
+    };
+
+    patientVitalsHistory.push(sample);
+    if (patientVitalsHistory.length > MAX_PATIENT_HISTORY_POINTS) {
+        patientVitalsHistory = patientVitalsHistory.slice(-MAX_PATIENT_HISTORY_POINTS);
+    }
+}
+
+function renderPatientHrChart() {
+    const canvas = document.getElementById('patient-hr-chart');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const ratio = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 860;
+    const cssHeight = 220;
+    canvas.width = Math.round(cssWidth * ratio);
+    canvas.height = Math.round(cssHeight * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+    const width = cssWidth;
+    const height = cssHeight;
+    ctx.clearRect(0, 0, width, height);
+
+    const pad = { top: 16, right: 16, bottom: 28, left: 34 };
+    const plotW = width - pad.left - pad.right;
+    const plotH = height - pad.top - pad.bottom;
+    const minY = 40;
+    const maxY = 140;
+    const toY = (v) => pad.top + (maxY - v) / (maxY - minY) * plotH;
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, width, height);
+
+    const normalTop = toY(100);
+    const normalBottom = toY(60);
+    ctx.fillStyle = 'rgba(22, 163, 74, 0.10)';
+    ctx.fillRect(pad.left, normalTop, plotW, normalBottom - normalTop);
+
+    ctx.strokeStyle = 'rgba(220, 38, 38, 0.45)';
+    ctx.setLineDash([6, 6]);
+    [50, 120].forEach((line) => {
+        const y = toY(line);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+    });
+    ctx.setLineDash([]);
+
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1;
+    [40, 60, 80, 100, 120, 140].forEach((line) => {
+        const y = toY(line);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+    });
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '12px Segoe UI, sans-serif';
+    [40, 60, 80, 100, 120, 140].forEach((line) => {
+        const y = toY(line);
+        ctx.fillText(String(line), 4, y + 4);
+    });
+
+    if (!patientVitalsHistory.length) {
+        ctx.fillStyle = '#64748b';
+        ctx.fillText('Waiting for heart rate updates...', pad.left + 10, pad.top + 24);
+        return;
+    }
+
+    const points = patientVitalsHistory.map((item, index, arr) => {
+        const x = arr.length === 1 ? pad.left + plotW / 2 : pad.left + (index / (arr.length - 1)) * plotW;
+        const y = toY(Math.max(minY, Math.min(maxY, item.heartRate)));
+        return { x, y, raw: item };
+    });
+
+    ctx.strokeStyle = '#0f766e';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    points.forEach((p, idx) => {
+        if (idx === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+    });
+    ctx.stroke();
+
+    points.forEach((p) => {
+        const critical = p.raw.heartRate < 50 || p.raw.heartRate > 120;
+        ctx.fillStyle = critical ? '#dc2626' : '#0f766e';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+function parseBloodPressure(value) {
+    const match = /^\s*(\d{2,3})\s*\/\s*(\d{2,3})\s*$/.exec(String(value || ''));
+    if (!match) return null;
+
+    return {
+        systolic: Number(match[1]),
+        diastolic: Number(match[2])
+    };
+}
+
+function getVitalsAlerts(vitals) {
+    const alerts = [];
+    const hr = Number(vitals?.heartRate);
+    const rr = Number(vitals?.respiratoryRate);
+    const spo2 = Number(vitals?.oxygenSaturation);
+    const bp = parseBloodPressure(vitals?.bloodPressure);
+
+    if (Number.isFinite(hr) && (hr < 50 || hr > 120)) {
+        alerts.push({
+            level: 'danger',
+            title: 'Heart Rate Alert',
+            detail: `Heart rate ${hr} bpm is outside safe range (50-120).`
+        });
+    }
+
+    if (Number.isFinite(rr) && (rr < 10 || rr > 24)) {
+        alerts.push({
+            level: 'warning',
+            title: 'Respiratory Alert',
+            detail: `Respiratory rate ${rr}/min is outside normal range (10-24).`
+        });
+    }
+
+    if (Number.isFinite(spo2) && spo2 < 94) {
+        alerts.push({
+            level: spo2 < 90 ? 'danger' : 'warning',
+            title: 'Oxygen Alert',
+            detail: `SpO2 at ${spo2}% is low${spo2 < 90 ? ' and needs immediate review' : ''}.`
+        });
+    }
+
+    if (bp && (bp.systolic >= 180 || bp.diastolic >= 120 || bp.systolic < 90)) {
+        alerts.push({
+            level: 'danger',
+            title: 'Blood Pressure Alert',
+            detail: `BP ${bp.systolic}/${bp.diastolic} mmHg indicates critical systolic/diastolic status.`
+        });
+    }
+
+    return alerts;
+}
+
+function renderPatientVitalAlerts(vitals) {
+    const container = document.getElementById('patient-vitals-alerts');
+    if (!container) return;
+
+    const alerts = getVitalsAlerts(vitals);
+    if (!alerts.length) {
+        container.innerHTML = '<div class="patient-alert-ok">Vitals are currently in a stable range.</div>';
+        patientVitalsAlertSignature = '';
+        return;
+    }
+
+    container.innerHTML = alerts.map((alert) => `
+        <div class="patient-alert ${alert.level}">
+            <strong>${alert.title}</strong>
+            <span>${alert.detail}</span>
+        </div>
+    `).join('');
+
+    const signature = alerts.map((item) => `${item.title}:${item.detail}`).join('|');
+    if (signature !== patientVitalsAlertSignature) {
+        showNotification(`Patient monitor alert: ${alerts[0].detail}`, alerts[0].level === 'danger' ? 'danger' : 'warning');
+        patientVitalsAlertSignature = signature;
+    }
+}
+
+// UTILITY FUNCTIONS
+function refreshPatientList() {
+    const role = currentUser.role;
+    if (role === 'doctor') loadDoctorDashboard();
+    else if (role === 'staff') loadStaffDashboard();
+    else if (role === 'admin') loadAdminDashboard();
+}
+
+function updatePatientInUI(patient) {
+    refreshPatientList();
+}
+
+function updateVitalsInUI(patient) {
+    const vitalsContainer = document.querySelector(`[data-vitals-id="${patient.id}"]`);
+    if (vitalsContainer) {
+        vitalsContainer.innerHTML = `
+            <div class="vital-item">
+                <div class="label">Temperature</div>
+                <div class="value">${patient.vitals.temperature || '-'}°C</div>
+            </div>
+            <div class="vital-item">
+                <div class="label">BP</div>
+                <div class="value">${patient.vitals.bloodPressure || '-'}</div>
+            </div>
+            <div class="vital-item">
+                <div class="label">HR</div>
+                <div class="value">${patient.vitals.heartRate || '-'}</div>
+            </div>
+            <div class="vital-item">
+                <div class="label">RR</div>
+                <div class="value">${patient.vitals.respiratoryRate || '-'}</div>
+            </div>
+        `;
+    }
+}
+
+function setupStaffPatientForm() {
+    const form = document.getElementById('staff-new-patient-form');
+    const status = document.getElementById('new-patient-status');
+    const categorySelect = document.getElementById('new-patient-category');
+    if (!form) return;
+
+    if (categorySelect) {
+        categorySelect.addEventListener('change', populateDoctorSelect);
+    }
+
+    populateDoctorSelect();
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const selectedDoctorId = document.getElementById('new-patient-doctor').value;
+        const selectedDoctor = getDoctorById(selectedDoctorId);
+
+        const payload = {
+            name: document.getElementById('new-patient-name').value.trim(),
+            patientCode: document.getElementById('new-patient-code').value.trim(),
+            age: document.getElementById('new-patient-age').value ? parseInt(document.getElementById('new-patient-age').value) : null,
+            gender: document.getElementById('new-patient-gender').value.trim() || 'Unknown',
+            bloodType: document.getElementById('new-patient-blood-type').value.trim() || 'Unknown',
+            phone: document.getElementById('new-patient-phone').value.trim(),
+            email: document.getElementById('new-patient-email').value.trim(),
+            address: document.getElementById('new-patient-address').value.trim(),
+            diagnosis: document.getElementById('new-patient-diagnosis').value.trim(),
+            sicknessCategory: document.getElementById('new-patient-category').value,
+            severity: document.getElementById('new-patient-severity').value,
+            assignedDoctor: selectedDoctorId ? parseInt(selectedDoctorId) : null,
+            requiredDoctorDepartment: selectedDoctor ? selectedDoctor.department : null,
+            assignedStaff: currentUser.id || null
+        };
+
+        if (!payload.name || !payload.patientCode || !payload.diagnosis || !payload.assignedDoctor) {
+            if (status) {
+                status.textContent = 'Please complete name, patient code, diagnosis, and doctor in charge.';
+            }
+            return;
+        }
+
+        try {
+            const response = await apiCall('/patients', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            if (response && response.ok) {
+                form.reset();
+                if (status) {
+                    status.textContent = 'Patient created successfully.';
+                }
+                showNotification('New patient created successfully.', 'success');
+                refreshPatientList();
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                if (status) {
+                    status.textContent = errorData.error || 'Unable to create patient.';
+                }
+            }
+        } catch (error) {
+            console.error('Error creating patient:', error);
+            if (status) {
+                status.textContent = 'Unable to create patient right now.';
+            }
+        }
+    });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    setupStaffPatientForm();
+    const doctorLeaveForm = document.getElementById('doctor-leave-form');
+    if (doctorLeaveForm) {
+        doctorLeaveForm.addEventListener('submit', submitDoctorLeave);
+    }
+    if (document.getElementById('loginForm') === null && isLoggedIn()) {
+        initializeDashboard();
+    }
+});

@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hospital Dashboard</title>
+    <link rel="stylesheet" href="css/styles.css?v=leave-workflow-20260818">
+    <script src="js/runtime-config.js?v=20260726c" defer></script>
+    <script src="js/auth.js?v=20260726c" defer></script>
+    <script src="js/dashboard.js?v=approval-letter-20260818" defer></script>
+</head>
+<body class="dashboard">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <h2>🏥 HMS</h2>
+        
+        <div class="user-info">
+            <p>Welcome</p>
+            <strong id="user-name">User</strong>
+            <p style="font-size: 11px; opacity: 0.7;" id="user-role">Role</p>
+        </div>
+        
+        <nav>
+            <ul>
+                <!-- DOCTOR MENU -->
+                <li id="doctor-menu" style="display: none;">
+                    <a href="#" onclick="switchSection('doctor-section')" class="nav-link active">Patients</a>
+                </li>
+                <li id="doctor-menu-2" style="display: none;">
+                    <a href="#" onclick="switchSection('doctor-messages-section')" class="nav-link">Notifications</a>
+                </li>
+                <li id="doctor-menu-3" style="display: none;">
+                    <a href="#" onclick="switchSection('doctor-operations-section')" class="nav-link">Operation Schedule</a>
+                </li>
+                <li id="doctor-menu-4" style="display: none;">
+                    <a href="#" onclick="switchSection('doctor-appointments-section')" class="nav-link">Appointment</a>
+                </li>
+                <li id="doctor-menu-5" style="display: none;">
+                    <a href="#" onclick="switchSection('doctor-leave-section')" class="nav-link">Leave Request</a>
+                </li>
+                
+                <!-- STAFF MENU -->
+                <li id="staff-menu" style="display: none;">
+                    <a href="#" onclick="switchSection('staff-section')" class="nav-link active">Dashboard</a>
+                </li>
+                <li id="staff-menu-2" style="display: none;">
+                    <a href="#" onclick="switchSection('staff-patients-section')" class="nav-link">Patient List</a>
+                </li>
+                
+                <!-- ADMIN MENU -->
+                <li id="admin-menu" style="display: none;">
+                    <a href="#" onclick="switchSection('admin-section')" class="nav-link active">Dashboard</a>
+                </li>
+                <li id="admin-menu-2" style="display: none;">
+                    <a href="#" onclick="switchSection('admin-users-section')" class="nav-link">Users</a>
+                </li>
+                <li id="admin-menu-3" style="display: none;">
+                    <a href="#" onclick="switchSection('admin-patients-section')" class="nav-link">Patients</a>
+                </li>
+                <li id="admin-menu-4" style="display: none;">
+                    <a href="#" onclick="switchSection('admin-leaves-section')" class="nav-link">Leave Approval</a>
+                </li>
+                
+                <!-- PATIENT MENU -->
+                <li id="patient-menu" style="display: none;">
+                    <a href="#" onclick="switchSection('patient-section')" class="nav-link active">My Health</a>
+                </li>
+                <li id="patient-menu-2" style="display: none;">
+                    <a href="#" onclick="openPatientMessages()" class="nav-link">Doctors</a>
+                </li>
+                <li id="family-menu" style="display: none;">
+                    <a href="#" onclick="switchSection('family-section')" class="nav-link">Family Health</a>
+                </li>
+            </ul>
+        </nav>
+        
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        <!-- NOTIFICATIONS -->
+        <div id="notifications-container"></div>
+
+        <section class="dashboard-hero">
+            <div class="hero-card">
+                <div class="hero-pill">Clinic Command Center</div>
+                <h1 id="dashboard-welcome">Welcome back, Doctor</h1>
+                <p id="dashboard-welcome-detail">Your next patient round, status updates, and clinical chats are ready.</p>
+            </div>
+        </section>
+
+        <!-- DOCTOR DASHBOARD -->
+        <div id="doctor-section" class="content-section">
+            <div class="header">
+                <h1>👨‍⚕️ Doctor Dashboard</h1>
+                <div class="header-right">
+                    <div class="search-box">
+                        <input type="text" placeholder="Search patients...">
+                    </div>
+                </div>
+            </div>
+
+            <div id="doctor-stats" class="grid"></div>
+
+            <div class="card">
+                <h3>Assigned Patients by Specialty</h3>
+                <p class="muted-text">Each doctor now sees only patients assigned to their specialty and care list.</p>
+                <div id="doctor-patients"></div>
+            </div>
+            <div class="card">
+                <h3>Appointment calendar</h3>
+                <div id="doctor-main-appointment-calendar" class="doctor-calendar"></div>
+            </div>
+        </div>
+
+        <!-- DOCTOR PATIENTS DETAIL -->
+        <div id="doctor-patients-section" class="content-section">
+            <div class="header">
+                <h1>Patient Details</h1>
+                <button class="btn btn-primary" onclick="switchSection('doctor-section')">← Back</button>
+            </div>
+            <div id="doctor-patient-detail"></div>
+        </div>
+
+        <!-- DOCTOR MESSAGES -->
+        <div id="doctor-messages-section" class="content-section">
+            <div class="header">
+                <h1>🔔 Notifications</h1>
+            </div>
+            <div class="card">
+                <h3>Clinical alert centre</h3>
+                <p class="muted-text">Incoming Code Blue notices, critical updates, and consult messages appear here.</p>
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h3>Consultation Messages</h3>
+                    </div>
+                    <div class="chat-messages" id="doctor-chat"></div>
+                    <div class="chat-input">
+                        <input type="text" id="doctor-message-input" placeholder="Type your message...">
+                        <button onclick="sendDoctorMessage()">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="doctor-operations-section" class="content-section">
+            <div class="header">
+                <h1>🗓️ Operation Schedule</h1>
+            </div>
+            <div class="card">
+                <h3>Schedule by your specialty</h3>
+                <ul id="doctor-operations-list" class="detail-list"></ul>
+            </div>
+        </div>
+
+        <div id="doctor-appointments-section" class="content-section">
+            <div class="header">
+                <h1>📅 Appointments</h1>
+            </div>
+            <div class="card">
+                <h3>Your appointment list</h3>
+                <div id="doctor-appointments-list"></div>
+                <div id="doctor-appointment-calendar" class="doctor-calendar"></div>
+            </div>
+        </div>
+
+        <div id="doctor-leave-section" class="content-section">
+            <div class="header">
+                <h1>🌴 Doctor Leave</h1>
+                <button class="btn btn-primary" onclick="switchSection('doctor-appointments-section')">View Calendar</button>
+            </div>
+            <div class="card leave-request-card">
+                <h3>Request leave</h3>
+                <p class="muted-text">Choose the days you need off. Admin approval is required before those dates are blocked.</p>
+                <form id="doctor-leave-form" class="leave-form">
+                    <div class="form-group">
+                        <label for="leave-start-date">Start date</label>
+                        <input type="date" id="leave-start-date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="leave-end-date">End date</label>
+                        <input type="date" id="leave-end-date" required>
+                    </div>
+                    <div class="form-group leave-reason-field">
+                        <label for="leave-reason">Reason</label>
+                        <input type="text" id="leave-reason" maxlength="300" placeholder="Annual leave, medical leave..." required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Submit for Approval</button>
+                </form>
+            </div>
+            <div class="card">
+                <h3>My leave requests</h3>
+                <div id="doctor-leave-list"></div>
+            </div>
+        </div>
+
+        <!-- DOCTOR->STAFF MESSAGE -->
+        <div id="doctor-staff-section" class="content-section">
+            <div class="header">
+                <h1>👩‍⚕️ Message Nursing Team</h1>
+                <button class="btn btn-primary" onclick="switchSection('doctor-section')">← Back</button>
+            </div>
+            <div class="card">
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h3>Send alert to nursing staff</h3>
+                    </div>
+                    <div class="chat-messages" id="doctor-staff-chat"></div>
+                    <div class="chat-input">
+                        <input type="text" id="doctor-staff-message-input" placeholder="Message to nursing team...">
+                        <button onclick="sendDoctorToStaffMessage()">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STAFF DASHBOARD -->
+        <div id="staff-section" class="content-section">
+            <div class="header">
+                <h1>👩‍⚕️ Staff Dashboard</h1>
+            </div>
+
+            <div id="staff-stats" class="grid"></div>
+
+            <div class="card">
+                <h3>Update Patient Vitals</h3>
+                <div id="staff-patients"></div>
+            </div>
+
+            <div class="card">
+                <h3>Appointment Requests</h3>
+                <p class="muted-text">Staff can review appointment requests and patient booking details.</p>
+                <div id="staff-appointments"></div>
+            </div>
+
+            <div class="card">
+                <h3>Add New Patient</h3>
+                <form id="staff-new-patient-form" class="patient-form">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="new-patient-name">Full Name</label>
+                            <input type="text" id="new-patient-name" placeholder="e.g. Nur Aisyah" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-code">Patient Code</label>
+                            <input type="text" id="new-patient-code" placeholder="e.g. NUR-004" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-age">Age</label>
+                            <input type="number" id="new-patient-age" min="1" placeholder="32">
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-gender">Gender</label>
+                            <input type="text" id="new-patient-gender" placeholder="Female">
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-blood-type">Blood Type</label>
+                            <input type="text" id="new-patient-blood-type" placeholder="A+">
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-phone">Phone</label>
+                            <input type="tel" id="new-patient-phone" placeholder="0123456789">
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-email">Email</label>
+                            <input type="email" id="new-patient-email" placeholder="patient@email.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-address">Address</label>
+                            <input type="text" id="new-patient-address" placeholder="Hospital address">
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-diagnosis">Illness / Diagnosis</label>
+                            <input type="text" id="new-patient-diagnosis" placeholder="e.g. Chest pain, Migraine, Vision loss" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-category">Sickness Category</label>
+                            <select id="new-patient-category" required>
+                                <option value="General Medicine">General Medicine</option>
+                                <option value="Cardiology">Cardiology</option>
+                                <option value="Psychiatry">Psychiatry</option>
+                                <option value="Surgery">Surgery</option>
+                                <option value="Neurosurgery">Neurosurgery</option>
+                                <option value="Neuro-Oftalmology">Neuro-Oftalmology</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-severity">Severity</label>
+                            <select id="new-patient-severity">
+                                <option value="Moderate">Moderate</option>
+                                <option value="Mild">Mild</option>
+                                <option value="Severe">Severe</option>
+                                <option value="Critical">Critical</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-patient-doctor">Doctor In Charge (Required)</label>
+                            <select id="new-patient-doctor" required>
+                                <option value="">-- Select doctor --</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create Patient</button>
+                    <div id="new-patient-status" class="form-status"></div>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>Staff Team Chat</h3>
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h3>Team Communications</h3>
+                    </div>
+                    <div class="chat-messages" id="staff-chat"></div>
+                    <div class="chat-input">
+                        <input type="text" id="staff-message-input" placeholder="Share an update with your team...">
+                        <button onclick="sendStaffTeamMessage()">Send</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Emergency Alert</h3>
+                <p>Send a system-wide Code Blue alert to doctors, nurses, admins, and patients.</p>
+                <button class="btn btn-danger" onclick="openCodeBluePrompt()">Trigger Code Blue</button>
+            </div>
+        </div>
+
+        <!-- STAFF PATIENTS -->
+        <div id="staff-patients-section" class="content-section">
+            <div class="header">
+                <h1>Patient List</h1>
+                <button class="btn btn-primary" onclick="switchSection('staff-section')">← Back</button>
+            </div>
+            <div class="card">
+                <div id="staff-patient-list"></div>
+            </div>
+        </div>
+
+        <!-- ADMIN DASHBOARD -->
+        <div id="admin-section" class="content-section">
+            <div class="header">
+                <h1>⚙️ Administration Dashboard</h1>
+            </div>
+
+            <div id="admin-stats" class="grid"></div>
+
+            <div class="card">
+                <h3>System Overview</h3>
+                <p>Welcome to the Hospital Management System Administration Panel.</p>
+                <p>Manage users, patients, and monitor system activity from the menu.</p>
+            </div>
+            <div class="card">
+                <h3>Leave requests awaiting review</h3>
+                <div id="admin-leave-summary"></div>
+            </div>
+            <div class="card">
+                <h3>All patient records</h3>
+                <div id="admin-overview-patients"></div>
+            </div>
+            <div class="card">
+                <h3>All booked appointments</h3>
+                <div id="admin-overview-appointments"></div>
+            </div>
+        </div>
+
+        <div id="admin-leaves-section" class="content-section">
+            <div class="header">
+                <h1>Leave Approval</h1>
+                <button class="btn btn-primary" onclick="switchSection('admin-section')">← Back</button>
+            </div>
+            <div class="card">
+                <h3>Doctor leave requests</h3>
+                <div id="admin-leave-requests"></div>
+            </div>
+        </div>
+
+        <!-- ADMIN USERS -->
+        <div id="admin-users-section" class="content-section">
+            <div class="header">
+                <h1>User Management</h1>
+                <button class="btn btn-primary" onclick="switchSection('admin-section')">← Back</button>
+            </div>
+            <div class="card">
+                <h3>Hospital Staff & Users</h3>
+                <div id="admin-users"></div>
+            </div>
+        </div>
+
+        <!-- ADMIN PATIENTS -->
+        <div id="admin-patients-section" class="content-section">
+            <div class="header">
+                <h1>Patient Management</h1>
+                <button class="btn btn-primary" onclick="switchSection('admin-section')">← Back</button>
+            </div>
+            <div class="card">
+                <h3>All Hospital Patients</h3>
+                <div id="admin-patients"></div>
+            </div>
+        </div>
+
+        <!-- PATIENT DASHBOARD -->
+        <div id="patient-section" class="content-section">
+            <div class="header">
+                <h1>📋 My Health Information</h1>
+            </div>
+            <div id="patient-content"></div>
+        </div>
+
+        <div id="family-section" class="content-section">
+            <div class="header">
+                <h1>👨‍👩‍👧 Family Health Overview</h1>
+            </div>
+            <div id="family-content"></div>
+        </div>
+
+        <!-- PATIENT MESSAGES -->
+        <div id="patient-messages-section" class="content-section">
+            <div class="header">
+                <h1>💬 My Healthcare Team</h1>
+                <button class="btn btn-primary" onclick="switchSection('patient-section')">← Back</button>
+            </div>
+            <div class="card">
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h3>Messages with Your Doctor</h3>
+                    </div>
+                    <div class="chat-messages" id="patient-chat"></div>
+                    <div class="chat-input">
+                        <input type="text" id="patient-message-input" placeholder="Type your message...">
+                        <button onclick="sendPatientMessage()">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- VITALS UPDATE MODAL -->
+    <div id="vitals-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Update Patient Vitals</h2>
+                <button class="modal-close" onclick="closeModal('vitals-modal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="vitals-temperature">Temperature (°C)</label>
+                    <input type="number" id="vitals-temperature" step="0.1" placeholder="37.5">
+                </div>
+                <div class="form-group">
+                    <label for="vitals-bp">Blood Pressure (mmHg)</label>
+                    <input type="text" id="vitals-bp" placeholder="120/80">
+                </div>
+                <div class="form-group">
+                    <label for="vitals-hr">Heart Rate (bpm)</label>
+                    <input type="number" id="vitals-hr" placeholder="72">
+                </div>
+                <div class="form-group">
+                    <label for="vitals-rr">Respiratory Rate (breaths/min)</label>
+                    <input type="number" id="vitals-rr" placeholder="16">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('vitals-modal')">Cancel</button>
+                <button class="btn btn-primary" onclick="submitVitals()">Update</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CODE BLUE MODAL -->
+    <div id="code-blue-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Send Code Blue Alert</h2>
+                <button class="modal-close" onclick="closeModal('code-blue-modal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="code-blue-patient">Select Patient</label>
+                    <select id="code-blue-patient">
+                        <option value="">-- General Emergency (No Specific Patient) --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="code-blue-room">Room Number</label>
+                    <input type="text" id="code-blue-room" placeholder="e.g. ICU-3, Ward 5B">
+                </div>
+                <div class="form-group">
+                    <label for="code-blue-note">Emergency Note</label>
+                    <textarea id="code-blue-note" rows="4" placeholder="Describe the emergency and patient concern..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('code-blue-modal')">Cancel</button>
+                <button class="btn btn-danger" onclick="submitCodeBlue()">Send Code Blue</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="code-blue-overlay" class="code-blue-overlay" onclick="dismissCodeBlueOverlay()">
+        <div class="code-blue-card" onclick="event.stopPropagation()">
+            <div class="code-blue-badge">CODE BLUE</div>
+            <h2>Emergency Alert Triggered</h2>
+            <p id="code-blue-overlay-message">Immediate assistance is required across the clinical team.</p>
+            <button class="btn btn-secondary" onclick="dismissCodeBlueOverlay()">Acknowledge</button>
+        </div>
+    </div>
+
+    <script>
+        // Menu item display based on role
+        function showRoleMenu(role) {
+            const menus = {
+                'doctor': ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4'],
+                'staff': ['staff-menu', 'staff-menu-2'],
+                'admin': ['admin-menu', 'admin-menu-2', 'admin-menu-3'],
+                'patient': ['patient-menu', 'patient-menu-2'],
+                'family': ['patient-menu', 'family-menu']
+            };
+
+            Object.values(menus).flat().forEach(menu => {
+                const menuNode = document.getElementById(menu);
+                if (menuNode) menuNode.style.display = 'none';
+            });
+
+            (menus[role] || []).forEach(menu => {
+                const menuNode = document.getElementById(menu);
+                if (menuNode) menuNode.style.display = 'list-item';
+            });
+        }
+
+        // Switch content section
+        function switchSection(sectionId) {
+            document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+        }
+
+        // Modal functions
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        function showCodeBlueOverlay(message) {
+            const overlay = document.getElementById('code-blue-overlay');
+            const msg = document.getElementById('code-blue-overlay-message');
+            if (!overlay || !msg) return;
+            msg.textContent = message || 'Immediate assistance is required across the clinical team.';
+            overlay.classList.add('show');
+        }
+
+        function dismissCodeBlueOverlay() {
+            const overlay = document.getElementById('code-blue-overlay');
+            if (overlay) overlay.classList.remove('show');
+        }
+
+        function updateVitalsModal(patientId) {
+            document.getElementById('vitals-modal').classList.add('show');
+            document.getElementById('vitals-modal').dataset.patientId = patientId;
+        }
+
+        async function submitVitals() {
+            const patientId = document.getElementById('vitals-modal').dataset.patientId;
+            const temperature = document.getElementById('vitals-temperature').value;
+            const bloodPressure = document.getElementById('vitals-bp').value;
+            const heartRate = document.getElementById('vitals-hr').value;
+            const respiratoryRate = document.getElementById('vitals-rr').value;
+
+            try {
+                const response = await apiCall(`/patients/${patientId}/vitals`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        temperature: parseFloat(temperature),
+                        bloodPressure,
+                        heartRate: parseInt(heartRate),
+                        respiratoryRate: parseInt(respiratoryRate)
+                    })
+                });
+
+                if (response && response.ok) {
+                    showNotification('Vitals updated successfully!', 'success');
+                    closeModal('vitals-modal');
+                    refreshPatientList();
+                }
+            } catch (error) {
+                console.error('Error updating vitals:', error);
+                showNotification('Error updating vitals', 'danger');
+            }
+        }
+
+    </script>
+</body>
+</html>
