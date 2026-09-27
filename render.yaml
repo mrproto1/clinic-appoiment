@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: clinic-appointment-system
+    runtime: docker
+    plan: free
+    envVars:
+      - key: APP_SECRET
+        generateValue: true
+      - key: MYSQL_HOST
+        sync: false
+      - key: MYSQL_PORT
+        value: "3306"
+      - key: MYSQL_USER
+        sync: false
+      - key: MYSQL_PASS
+        sync: false
+      - key: MYSQL_DB
+        value: clinic_appointment_system
+      - key: PORT
+        value: "10000"
