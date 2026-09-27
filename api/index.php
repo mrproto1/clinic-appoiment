@@ -1,5 +1,8 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
 if (function_exists('mysqli_report')) {
     mysqli_report(MYSQLI_REPORT_OFF);
@@ -10,12 +13,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-define('APP_SECRET', 'hospital-secret-key-2026');
-define('MYSQL_HOST', '127.0.0.1');
-define('MYSQL_PORT', 3306);
-define('MYSQL_USER', 'root');
-define('MYSQL_PASS', '');
-define('MYSQL_DB', 'clinic_appointment_system');
+define('APP_SECRET', getenv('APP_SECRET') ?: 'hospital-secret-key-2026');
+define('MYSQL_HOST', getenv('MYSQL_HOST') ?: '127.0.0.1');
+define('MYSQL_PORT', getenv('MYSQL_PORT') ?: 3306);
+define('MYSQL_USER', getenv('MYSQL_USER') ?: 'root');
+define('MYSQL_PASS', getenv('MYSQL_PASS') ?: '');
+define('MYSQL_DB', getenv('MYSQL_DB') ?: 'clinic_appointment_system');
 
 initialize_data_store();
 
@@ -451,6 +454,7 @@ function sanitize_user($user)
         'name' => $user['name'],
         'role' => $user['role'],
         'email' => $user['email'] ?? null,
+        'phone' => $user['phone'] ?? null,
         'department' => $user['department'] ?? null,
         'linkedPatientId' => isset($user['linkedPatientId']) ? (int)$user['linkedPatientId'] : null,
         'linkedPatientEmail' => $user['linkedPatientEmail'] ?? null,
@@ -543,6 +547,7 @@ function handle_auth_routes($method, $segments, $body)
         $password = (string)($body['password'] ?? '');
         $name = trim((string)($body['name'] ?? ''));
         $email = trim((string)($body['email'] ?? ''));
+        $phone = trim((string)($body['phone'] ?? $body['familyPhone'] ?? ''));
         $role = trim((string)($body['role'] ?? 'patient'));
 
         if ($email !== '' && $username === '') {
@@ -629,6 +634,7 @@ function handle_auth_routes($method, $segments, $body)
             'name' => $name,
             'role' => $role,
             'email' => $email,
+            'phone' => $phone !== '' ? $phone : null,
             'department' => $body['department'] ?? null,
             'linkedPatientId' => $linkedPatientId,
             'linkedPatientEmail' => $linkedPatientEmail,
