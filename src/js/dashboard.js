@@ -264,6 +264,82 @@ function showNotification(message, type = 'info') {
     setTimeout(() => notification.remove(), 5000);
 }
 
+function normalizeContactName(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+}
+
+async function findLinkedFamilyContacts(patient) {
+    if (!patient) return [];
+
+    try {
+        const response = await apiCall('/users');
+        if (!response || !response.ok) return [];
+
+        const users = await response.json();
+        const patientEmail = String(patient.email || '').trim().toLowerCase();
+        const patientName = normalizeContactName(patient.name || '');
+
+        return (users || []).filter((user) => {
+            if ((user.role || '').toLowerCase() !== 'family') return false;
+            const linkedId = Number(user.linkedPatientId || user.linkedPatient || 0);
+            const linkedEmail = String(user.linkedPatientEmail || '').trim().toLowerCase();
+            const linkedName = normalizeContactName(user.linkedPatientName || '');
+            const matchesById = Number(patient.id) > 0 && linkedId === Number(patient.id);
+            const matchesByEmail = patientEmail !== '' && linkedEmail !== '' && patientEmail === linkedEmail;
+            const matchesByName = patientName !== '' && linkedName !== '' && patientName === linkedName;
+            return matchesById || matchesByEmail || matchesByName;
+        }).filter((user) => String(user.phone || user.familyPhone || '').trim() !== '');
+    } catch (error) {
+        console.error('Unable to load family contacts:', error);
+        return [];
+    }
+}
+
+function openBirdContact(phoneNumber, messageText) {
+    const cleanNumber = String(phoneNumber || '').replace(/\D/g, '');
+    if (!cleanNumber) return false;
+
+    const encodedMessage = encodeURIComponent(messageText || 'Emergency alert');
+    const birdUrl = `sms:${cleanNumber}?body=${encodedMessage}`;
+    window.open(birdUrl, '_blank');
+    return true;
+}
+
+async function triggerFamilyCodeBlueContact(patient, roomNumber, note) {
+    if (!patient) return;
+
+    const roomText = roomNumber ? ` Room: ${roomNumber}` : ' Room: not specified';
+    const noteText = note ? ` Note: ${note}` : '';
+    const messageText = `CODE BLUE emergency for ${patient.name}${roomText}.${noteText} Please contact the clinical team immediately.`;
+
+    const patientPhone = String(patient.phone || '').replace(/\D/g, '');
+    if (patientPhone) {
+        const opened = openBirdContact(patientPhone, messageText);
+        if (opened) {
+            showNotification('Family alert sent using the registered patient phone number.', 'danger');
+        }
+        return;
+    }
+
+    const familyContacts = await findLinkedFamilyContacts(patient);
+    if (!familyContacts.length) {
+        showNotification('No linked patient or family contact number was found for this emergency alert.', 'warning');
+        return;
+    }
+
+    let sentCount = 0;
+    familyContacts.forEach((familyContact) => {
+        const opened = openBirdContact(familyContact.phone || familyContact.familyPhone, messageText);
+        if (opened) sentCount += 1;
+    });
+
+    if (sentCount > 0) {
+        showNotification(`Family alert sent to ${sentCount} linked contact${sentCount > 1 ? 's' : ''}.`, 'danger');
+    } else {
+        showNotification('No valid contact number was available for Bird/SMS contact.', 'warning');
+    }
+}
+
 // Initialize dashboard
 async function initializeDashboard() {
     if (!requireAuth()) return;
@@ -1397,6 +1473,9 @@ async function submitCodeBlue() {
             const patientLabel = selectedPatient ? selectedPatient.name : 'General emergency';
             const roomLabel = roomNumber || 'Room not specified';
             const message = `CODE BLUE • Patient: ${patientLabel} • Room: ${roomLabel}${note ? ` • Note: ${note}` : ''}`;
+            if (selectedPatient) {
+                await triggerFamilyCodeBlueContact(selectedPatient, roomNumber, note);
+            }
             showNotification('Code Blue alert sent to all clinical teams.', 'danger');
             showCodeBlueOverlay(message);
             closeModal('code-blue-modal');
@@ -2283,9 +2362,11 @@ function setupStaffPatientForm() {
                 showNotification('New patient created successfully.', 'success');
                 refreshPatientList();
             } else {
-                const errorData = await response.json().catch(() => ({}));
+                const errorData = response
+                    ? await response.json().catch(() => ({}))
+                    : { error: 'Your login session expired. Please log in again.' };
                 if (status) {
-                    status.textContent = errorData.error || 'Unable to create patient.';
+                    status.textContent = errorData.error || `Unable to create patient (HTTP ${response.status}).`;
                 }
             }
         } catch (error) {
