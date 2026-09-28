@@ -1126,11 +1126,11 @@ nav li {
 
 .family-ecg-row {
     display: grid;
-    grid-template-columns: 142px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: center;
-    gap: 12px;
+    gap: 0;
     min-width: 0;
-    padding: 7px;
+    padding: 0;
     border: 1px solid transparent;
     border-radius: 8px;
 }
@@ -1177,6 +1177,25 @@ nav li {
 .family-ecg-note {
     margin: 12px 0 0;
     line-height: 1.5;
+}
+
+.family-vitals-source {
+    margin: 0 0 12px;
+    padding: 9px 11px;
+    border: 1px solid #e9c789;
+    border-radius: 8px;
+    background: #fff7e6;
+    color: #74541d;
+    font-size: 0.82rem;
+    font-weight: 700;
+    line-height: 1.5;
+}
+
+.family-ecg-no-signal {
+    margin: 0;
+    padding: 14px;
+    color: #74817f;
+    font-size: 0.84rem;
 }
 
 .chart-legend-inline {

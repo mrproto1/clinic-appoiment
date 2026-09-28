@@ -17,6 +17,7 @@ let patientVitalsHistory = [];
 let patientVitalsAlertSignature = '';
 let doctorVitalsHistoryByPatient = {};
 let doctorEcgStateByPatient = {};
+const familyDemoVitalsByPatient = new Map();
 const MAX_RECONNECT_ATTEMPTS = 5;
 const CODE_BLUE_POLL_MS = 1000;
 const MAX_PATIENT_HISTORY_POINTS = 18;
@@ -2030,12 +2031,45 @@ function buildPatientHeartRateHistory(patient) {
     }));
 }
 
+function getFamilyDisplayVitals(patient) {
+    const recordedVitals = patient?.vitals || {};
+    const hasRecordedHeartRate = Number.isFinite(Number(recordedVitals.heartRate)) && Number(recordedVitals.heartRate) > 0;
+    const hasRecordedBloodPressure = /^\s*\d{2,3}\s*\/\s*\d{2,3}\s*$/.test(String(recordedVitals.bloodPressure || ''));
+
+    if (hasRecordedHeartRate || hasRecordedBloodPressure) {
+        return { vitals: recordedVitals, simulated: false };
+    }
+
+    const severity = String(patient?.severity || 'Moderate');
+    const severityKey = severity.toLowerCase();
+    const profileKey = `${patient?.id || 'unlinked'}:${severityKey}`;
+    if (!familyDemoVitalsByPatient.has(profileKey)) {
+        const profiles = {
+            critical: { hr: [118, 138], systolic: [145, 175], diastolic: [90, 112] },
+            severe: { hr: [98, 118], systolic: [130, 158], diastolic: [82, 102] },
+            moderate: { hr: [78, 99], systolic: [118, 143], diastolic: [72, 92] },
+            mild: { hr: [62, 88], systolic: [108, 132], diastolic: [65, 85] }
+        };
+        const profile = profiles[severityKey] || profiles.moderate;
+        const randomInRange = ([min, max]) => min + Math.floor(Math.random() * (max - min + 1));
+        familyDemoVitalsByPatient.set(profileKey, {
+            heartRate: randomInRange(profile.hr),
+            bloodPressure: `${randomInRange(profile.systolic)}/${randomInRange(profile.diastolic)}`,
+            lastUpdated: new Date().toISOString()
+        });
+    }
+
+    return { vitals: { ...recordedVitals, ...familyDemoVitalsByPatient.get(profileKey) }, simulated: true };
+}
+
 function renderPatientHealthPanel(patient, targetId = 'patient-content') {
     const container = document.getElementById(targetId);
     if (!container) return;
 
     const isFamilyView = targetId === 'family-content';
-    const vitals = patient?.vitals || {};
+    const familyVitals = isFamilyView ? getFamilyDisplayVitals(patient) : null;
+    const vitals = familyVitals ? familyVitals.vitals : (patient?.vitals || {});
+    const isSimulated = Boolean(familyVitals?.simulated);
     const severity = patient?.severity || 'Moderate';
     const doctorName = getDoctorLabel(patient?.assignedDoctor);
     const updatedAt = vitals.lastUpdated ? new Date(vitals.lastUpdated) : new Date();
@@ -2044,7 +2078,7 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
     }
 
     const heartRatePanel = isFamilyView
-        ? buildFamilyEcgGuide(vitals.heartRate)
+        ? buildFamilyEcgGuide(vitals.heartRate, severity, isSimulated)
         : `
             <div class="patient-hr-chart-wrap">
                 <div class="chart-header-row">
@@ -2073,6 +2107,8 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
 
             <div id="patient-vitals-alerts" class="patient-alert-stack"></div>
 
+            ${isFamilyView && isSimulated ? '<p class="family-vitals-source">Simulated demo values based on severity. These are not patient readings.</p>' : ''}
+
             <div class="vitals-grid">
                 <div class="vital-item"><div class="label">Heart Rate</div><div class="value">${vitals.heartRate ?? '-'} bpm</div></div>
                 <div class="vital-item"><div class="label">Respiratory</div><div class="value">${vitals.respiratoryRate ?? '-'} /min</div></div>
@@ -2096,32 +2132,16 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
     }
 
     if (!isFamilyView) renderPatientHrChart();
-    renderPatientVitalAlerts(vitals);
+    if (!isFamilyView || !isSimulated) renderPatientVitalAlerts(vitals);
 }
 
-function buildFamilyEcgGuide(heartRate) {
+function buildFamilyEcgGuide(heartRate, severity, isSimulated) {
     const bpm = Number(heartRate);
-    const currentKey = !Number.isFinite(bpm) || bpm <= 0
-        ? ''
-        : bpm > 100
-            ? 'tachy'
-            : bpm < 60
-                ? 'brady'
-                : 'normal';
-    const patterns = [
-        { key: 'tachy', label: 'Tachycardia', intervals: [34] },
-        { key: 'normal', label: 'Normal', intervals: [58] },
-        { key: 'brady', label: 'Bradycardia', intervals: [88] },
-        { key: 'irregular', label: 'Irregular', intervals: [40, 76, 34, 68, 46, 82] }
-    ];
-
-    const rows = patterns.map((pattern) => {
-        const isCurrent = currentKey === pattern.key;
-        const points = [];
-        let position = 0;
-        let beatIndex = 0;
-        while (position < 520) {
-            const spacing = pattern.intervals[beatIndex % pattern.intervals.length];
+    const hasHeartRate = Number.isFinite(bpm) && bpm > 0;
+    const points = [];
+    if (hasHeartRate) {
+        const spacing = Math.max(28, Math.min(90, 82 - (bpm - 60) * 0.5));
+        for (let position = 0; position < 520; position += spacing) {
             points.push(
                 [position, 26],
                 [position + spacing * 0.13, 26],
@@ -2136,39 +2156,27 @@ function buildFamilyEcgGuide(heartRate) {
                 [position + spacing * 0.83, 26],
                 [position + spacing, 26]
             );
-            position += spacing;
-            beatIndex += 1;
         }
-
-        const path = points.map((point, index) => `${index ? 'L' : 'M'}${point[0].toFixed(1)} ${point[1]}`).join(' ');
-        return `
-            <div class="family-ecg-row ${isCurrent ? 'is-current' : ''}">
-                <div class="family-ecg-label">
-                    <strong>${pattern.label}</strong>
-                    <span>${isCurrent ? 'Matches current BPM' : 'Pattern example'}</span>
-                </div>
-                <svg class="family-ecg-trace" viewBox="0 0 520 52" preserveAspectRatio="none" role="img" aria-label="Illustrative ${pattern.label} rhythm pattern">
-                    <path d="${path}"></path>
-                </svg>
-            </div>
-        `;
-    }).join('');
-
-    const status = currentKey
-        ? `${Math.round(bpm)} bpm · ${patterns.find((pattern) => pattern.key === currentKey).label}`
-        : 'Waiting for heart rate';
+    }
+    const path = points.map((point, index) => `${index ? 'L' : 'M'}${point[0].toFixed(1)} ${point[1]}`).join(' ');
+    const readingLabel = hasHeartRate ? `${Math.round(bpm)} bpm` : 'No heart-rate reading';
+    const sourceLabel = isSimulated ? `${severity} demo profile` : 'Recorded reading';
+    const trace = hasHeartRate
+        ? `<svg class="family-ecg-trace" viewBox="0 0 520 52" preserveAspectRatio="none" role="img" aria-label="One illustrative heart-rate trace"><path d="${path}"></path></svg>`
+        : '<p class="family-ecg-no-signal">No heart-rate reading is recorded yet.</p>';
 
     return `
         <section class="family-ecg-panel" aria-label="Heart rate pattern guide">
             <div class="family-ecg-heading">
                 <div>
-                    <h4>Heart-rate patterns</h4>
-                    <p>Current reading: <strong>${status}</strong></p>
+                    <h4>Heart-rate pattern</h4>
+                    <p><strong>${readingLabel}</strong> · ${sourceLabel}</p>
                 </div>
-                <span class="family-ecg-live-dot" aria-hidden="true"></span>
             </div>
-            <div class="family-ecg-list">${rows}</div>
-            <p class="family-ecg-note">Illustrative patterns only. BPM alone cannot identify an irregular rhythm or diagnose an ECG condition.</p>
+            <div class="family-ecg-row is-current">
+                ${trace}
+            </div>
+            <p class="family-ecg-note">Illustrative trace only, not an ECG recording or diagnosis. ${isSimulated ? 'Demo values change by severity and are not real patient measurements.' : ''}</p>
         </section>
     `;
 }
