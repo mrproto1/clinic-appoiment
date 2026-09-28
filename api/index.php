@@ -20,13 +20,17 @@ define('MYSQL_USER', getenv('MYSQL_USER') ?: 'root');
 define('MYSQL_PASS', getenv('MYSQL_PASS') ?: '');
 define('MYSQL_DB', getenv('MYSQL_DB') ?: 'clinic_appointment_system');
 
-initialize_data_store();
-
 $requestMethod = $_SERVER['REQUEST_METHOD'];
 $requestUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $apiPath = extract_api_path($requestUri);
 $segments = $apiPath === '' ? [] : array_values(array_filter(explode('/', $apiPath), 'strlen'));
 $body = get_json_body();
+
+if (($segments[0] ?? '') === 'chat') {
+    handle_faq_chat($requestMethod, $segments, $body);
+}
+
+initialize_data_store();
 
 $allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves'];
 while (!empty($segments) && !in_array($segments[0], $allowedResources, true)) {
@@ -109,6 +113,100 @@ function respond($statusCode, $payload)
     http_response_code((int)$statusCode);
     echo json_encode($payload, JSON_UNESCAPED_SLASHES);
     exit;
+}
+
+function handle_faq_chat($method, $segments, $body)
+{
+    if ($method !== 'POST' || count($segments) !== 1) {
+        respond(405, ['error' => 'Method not allowed']);
+    }
+
+    $message = trim((string)($body['message'] ?? ''));
+    if ($message === '' || strlen($message) > 1200) {
+        respond(400, ['error' => 'Enter a message under 1,200 characters.']);
+    }
+
+    $forwardedAddresses = explode(',', (string)($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''));
+    $clientAddress = trim((string)($forwardedAddresses[0] ?? ''));
+    if ($clientAddress === '') {
+        $clientAddress = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    }
+    $clientHash = hash('sha256', $clientAddress);
+    $rateFile = sys_get_temp_dir() . '/protocol-faq-' . $clientHash . '.json';
+    $rateHandle = @fopen($rateFile, 'c+');
+    if ($rateHandle) {
+        flock($rateHandle, LOCK_EX);
+        $rateData = json_decode((string)stream_get_contents($rateHandle), true);
+        $recentRequests = array_values(array_filter($rateData['requests'] ?? [], function ($timestamp) {
+            return (int)$timestamp > time() - 60;
+        }));
+        if (count($recentRequests) >= 6) {
+            flock($rateHandle, LOCK_UN);
+            fclose($rateHandle);
+            respond(429, ['error' => 'Too many messages. Please wait a minute and try again.']);
+        }
+
+        $recentRequests[] = time();
+        ftruncate($rateHandle, 0);
+        rewind($rateHandle);
+        fwrite($rateHandle, json_encode(['requests' => $recentRequests]));
+        fflush($rateHandle);
+        flock($rateHandle, LOCK_UN);
+        fclose($rateHandle);
+    }
+
+    $apiKey = trim((string)getenv('OPENAI_API_KEY'));
+    if ($apiKey === '') {
+        respond(503, ['error' => 'The FAQ assistant is not configured yet.']);
+    }
+
+    $requestPayload = [
+        'model' => 'gpt-4o-mini',
+        'instructions' => 'You are The Protocol Cardiology website FAQ assistant. Answer briefly in the language the visitor uses. Only answer general questions about navigating this website, appointments, specialists, family access, and organ donor tributes. Do not invent clinic hours, contact details, prices, or medical facts. If information is not present, direct the visitor to the Contact Us page or clinic staff. Never diagnose, interpret symptoms, recommend treatment, or interpret heart-rate/ECG readings. For urgent symptoms, tell the visitor to contact local emergency services or seek immediate medical care. Do not request personal, account, or health information. Remind visitors not to share patient details in this public chat.',
+        'input' => $message,
+        'max_output_tokens' => 220,
+        'store' => false
+    ];
+    $httpContext = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\nAuthorization: Bearer {$apiKey}\r\n",
+            'content' => json_encode($requestPayload),
+            'timeout' => 25,
+            'ignore_errors' => true
+        ]
+    ]);
+
+    $responseBody = @file_get_contents('https://api.openai.com/v1/responses', false, $httpContext);
+    $statusCode = 0;
+    foreach ($http_response_header ?? [] as $header) {
+        if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $matches)) {
+            $statusCode = (int)$matches[1];
+        }
+    }
+
+    if ($responseBody === false || $statusCode < 200 || $statusCode >= 300) {
+        respond(502, ['error' => 'The FAQ assistant is temporarily unavailable. Please try again shortly.']);
+    }
+
+    $responseData = json_decode($responseBody, true);
+    $answer = '';
+    foreach ($responseData['output'] ?? [] as $outputItem) {
+        if (($outputItem['type'] ?? '') !== 'message') {
+            continue;
+        }
+        foreach ($outputItem['content'] ?? [] as $contentItem) {
+            if (($contentItem['type'] ?? '') === 'output_text') {
+                $answer .= (string)($contentItem['text'] ?? '');
+            }
+        }
+    }
+
+    if ($answer === '') {
+        respond(502, ['error' => 'The FAQ assistant could not prepare a response. Please try again.']);
+    }
+
+    respond(200, ['answer' => $answer]);
 }
 
 function create_token($user)

@@ -2176,6 +2176,212 @@ html {
     font-size: 0.82rem;
 }
 
+.faq-chat {
+    position: fixed;
+    right: 22px;
+    bottom: 22px;
+    z-index: 75;
+    display: grid;
+    justify-items: end;
+    gap: 12px;
+    font-family: 'Manrope', 'Segoe UI', sans-serif;
+}
+
+.faq-chat-panel[hidden] {
+    display: none;
+}
+
+.faq-chat-panel {
+    display: grid;
+    grid-template-rows: auto minmax(150px, 1fr) auto auto auto;
+    width: min(380px, calc(100vw - 32px));
+    max-height: min(590px, calc(100dvh - 108px));
+    overflow: hidden;
+    border: 1px solid rgba(16, 42, 53, 0.16);
+    border-radius: 14px;
+    background: #fffdf8;
+    box-shadow: 0 20px 55px rgba(16, 42, 53, 0.24);
+}
+
+.faq-chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    background: #102a35;
+    color: #f3f5f1;
+}
+
+.faq-chat-eyebrow {
+    margin: 0 0 4px;
+    color: #f8c99b;
+    font-size: 0.66rem;
+    font-weight: 800;
+}
+
+.faq-chat-header h2 {
+    margin: 0;
+    color: #fff;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 1.55rem;
+}
+
+.faq-chat-close {
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    background: transparent;
+    color: #fff;
+    font-size: 1.35rem;
+    cursor: pointer;
+}
+
+.faq-chat-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 180px;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.faq-chat-message {
+    max-width: 88%;
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 12px;
+    color: #183b3d;
+    font-size: 0.87rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.faq-chat-message.is-assistant {
+    align-self: flex-start;
+    border: 1px solid #dce7e2;
+    background: #edf4f0;
+}
+
+.faq-chat-message.is-visitor {
+    align-self: flex-end;
+    background: #15353a;
+    color: #fff;
+}
+
+.faq-chat-suggestions {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    padding: 0 14px 12px;
+}
+
+.faq-chat-suggestions button {
+    flex: 0 0 auto;
+    border: 1px solid #b9d2cb;
+    border-radius: 999px;
+    padding: 7px 10px;
+    background: #f5faf7;
+    color: #234c4c;
+    font: inherit;
+    font-size: 0.74rem;
+    cursor: pointer;
+}
+
+.faq-chat-suggestions button:hover {
+    background: #e8f0ed;
+}
+
+.faq-chat-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 12px 14px;
+    border-top: 1px solid #e3e9e5;
+}
+
+.faq-chat-form input {
+    min-width: 0;
+    min-height: 42px;
+    border: 1px solid #ccd8d4;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #fff;
+    color: #183b3d;
+    font: inherit;
+    font-size: 0.84rem;
+}
+
+.faq-chat-form input:focus {
+    border-color: #0f766e;
+    outline: 3px solid rgba(15, 118, 110, 0.14);
+}
+
+.faq-chat-form button {
+    min-width: 62px;
+    border: 0;
+    border-radius: 8px;
+    padding: 0 12px;
+    background: #15353a;
+    color: #fff;
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.faq-chat-form button:disabled,
+.faq-chat-form input:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+.faq-chat-disclaimer {
+    margin: 0;
+    padding: 0 14px 12px;
+    color: #74817f;
+    font-size: 0.7rem;
+}
+
+.faq-chat-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    min-height: 50px;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    border-radius: 999px;
+    padding: 0 18px;
+    background: #102a35;
+    color: #fff;
+    box-shadow: 0 10px 28px rgba(16, 42, 53, 0.22);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.faq-chat-toggle:hover {
+    background: #183b3d;
+}
+
+.faq-chat-toggle-mark {
+    color: #f8c99b;
+    font-size: 1.15rem;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+}
+
 @media (max-width: 760px) {
     .protocol-history-grid,
     .protocol-values-section {
@@ -2204,6 +2410,15 @@ html {
 
     .protocol-footer-links {
         justify-content: flex-start;
+    }
+
+    .faq-chat {
+        right: 14px;
+        bottom: 14px;
+    }
+
+    .faq-chat-panel {
+        max-height: min(560px, calc(100dvh - 84px));
     }
 }
 
