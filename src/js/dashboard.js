@@ -95,6 +95,11 @@ function initWebSocket() {
 
         if (role === 'patient') {
             await loadPatientDashboard();
+            return;
+        }
+
+        if (role === 'family') {
+            await loadFamilyDashboard();
         }
     }, 7000);
 }
@@ -2029,11 +2034,31 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
     const container = document.getElementById(targetId);
     if (!container) return;
 
+    const isFamilyView = targetId === 'family-content';
     const vitals = patient?.vitals || {};
     const severity = patient?.severity || 'Moderate';
     const doctorName = getDoctorLabel(patient?.assignedDoctor);
     const updatedAt = vitals.lastUpdated ? new Date(vitals.lastUpdated) : new Date();
-    patientVitalsHistory = buildPatientHeartRateHistory(patient);
+    if (!isFamilyView) {
+        patientVitalsHistory = buildPatientHeartRateHistory(patient);
+    }
+
+    const heartRatePanel = isFamilyView
+        ? buildFamilyEcgGuide(vitals.heartRate)
+        : `
+            <div class="patient-hr-chart-wrap">
+                <div class="chart-header-row">
+                    <h4>Heart Rate Trend</h4>
+                    <span class="muted-text">Updated ${updatedAt.toLocaleTimeString()}</span>
+                </div>
+                <canvas id="patient-hr-chart" width="860" height="220" aria-label="Heart rate trend chart"></canvas>
+                <div class="chart-legend-inline">
+                    <span><i class="legend-dot hr"></i>Heart Rate</span>
+                    <span><i class="legend-dot safe"></i>Normal Band (60-100 bpm)</span>
+                    <span><i class="legend-dot danger"></i>Critical Thresholds (&lt;50 / &gt;120)</span>
+                </div>
+            </div>
+        `;
 
     container.innerHTML = `
         <div class="card patient-monitor-card">
@@ -2056,22 +2081,11 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
                 <div class="vital-item"><div class="label">Temperature</div><div class="value">${vitals.temperature ?? '-'}°C</div></div>
             </div>
 
-            <div class="patient-hr-chart-wrap">
-                <div class="chart-header-row">
-                    <h4>Heart Rate Trend</h4>
-                    <span class="muted-text">Updated ${updatedAt.toLocaleTimeString()}</span>
-                </div>
-                <canvas id="patient-hr-chart" width="860" height="220" aria-label="Heart rate trend chart"></canvas>
-                <div class="chart-legend-inline">
-                    <span><i class="legend-dot hr"></i>Heart Rate</span>
-                    <span><i class="legend-dot safe"></i>Normal Band (60-100 bpm)</span>
-                    <span><i class="legend-dot danger"></i>Critical Thresholds (&lt;50 / &gt;120)</span>
-                </div>
-            </div>
+            ${heartRatePanel}
         </div>
     `;
 
-    if (vitals.heartRate) {
+    if (!isFamilyView && vitals.heartRate) {
         patientVitalsHistory = [{
             ts: Date.now(),
             heartRate: Number(vitals.heartRate),
@@ -2081,8 +2095,82 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
         }, ...patientVitalsHistory.slice(0, MAX_PATIENT_HISTORY_POINTS - 1)];
     }
 
-    renderPatientHrChart();
+    if (!isFamilyView) renderPatientHrChart();
     renderPatientVitalAlerts(vitals);
+}
+
+function buildFamilyEcgGuide(heartRate) {
+    const bpm = Number(heartRate);
+    const currentKey = !Number.isFinite(bpm) || bpm <= 0
+        ? ''
+        : bpm > 100
+            ? 'tachy'
+            : bpm < 60
+                ? 'brady'
+                : 'normal';
+    const patterns = [
+        { key: 'tachy', label: 'Tachycardia', intervals: [34] },
+        { key: 'normal', label: 'Normal', intervals: [58] },
+        { key: 'brady', label: 'Bradycardia', intervals: [88] },
+        { key: 'irregular', label: 'Irregular', intervals: [40, 76, 34, 68, 46, 82] }
+    ];
+
+    const rows = patterns.map((pattern) => {
+        const isCurrent = currentKey === pattern.key;
+        const points = [];
+        let position = 0;
+        let beatIndex = 0;
+        while (position < 520) {
+            const spacing = pattern.intervals[beatIndex % pattern.intervals.length];
+            points.push(
+                [position, 26],
+                [position + spacing * 0.13, 26],
+                [position + spacing * 0.18, 23],
+                [position + spacing * 0.23, 26],
+                [position + spacing * 0.34, 26],
+                [position + spacing * 0.39, 32],
+                [position + spacing * 0.43, 7],
+                [position + spacing * 0.48, 35],
+                [position + spacing * 0.55, 26],
+                [position + spacing * 0.73, 21],
+                [position + spacing * 0.83, 26],
+                [position + spacing, 26]
+            );
+            position += spacing;
+            beatIndex += 1;
+        }
+
+        const path = points.map((point, index) => `${index ? 'L' : 'M'}${point[0].toFixed(1)} ${point[1]}`).join(' ');
+        return `
+            <div class="family-ecg-row ${isCurrent ? 'is-current' : ''}">
+                <div class="family-ecg-label">
+                    <strong>${pattern.label}</strong>
+                    <span>${isCurrent ? 'Matches current BPM' : 'Pattern example'}</span>
+                </div>
+                <svg class="family-ecg-trace" viewBox="0 0 520 52" preserveAspectRatio="none" role="img" aria-label="Illustrative ${pattern.label} rhythm pattern">
+                    <path d="${path}"></path>
+                </svg>
+            </div>
+        `;
+    }).join('');
+
+    const status = currentKey
+        ? `${Math.round(bpm)} bpm · ${patterns.find((pattern) => pattern.key === currentKey).label}`
+        : 'Waiting for heart rate';
+
+    return `
+        <section class="family-ecg-panel" aria-label="Heart rate pattern guide">
+            <div class="family-ecg-heading">
+                <div>
+                    <h4>Heart-rate patterns</h4>
+                    <p>Current reading: <strong>${status}</strong></p>
+                </div>
+                <span class="family-ecg-live-dot" aria-hidden="true"></span>
+            </div>
+            <div class="family-ecg-list">${rows}</div>
+            <p class="family-ecg-note">Illustrative patterns only. BPM alone cannot identify an irregular rhythm or diagnose an ECG condition.</p>
+        </section>
+    `;
 }
 
 function pushPatientVitalsHistory(vitals) {

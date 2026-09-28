@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Access | The Protocol</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../css/styles.css">
+    <script>
+        window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
+    </script>
+    <script src="../js/runtime-config.js?v=20260726c" defer></script>
+    <script src="../js/auth.js?v=20260726c" defer></script>
+</head>
+<body class="contact-page">
+    <header class="contact-nav">
+        <a class="contact-brand" href="../index.html">
+            <span class="protocol-logo-mark" aria-label="The Protocol logo">&#10084;</span>
+            <span class="protocol-logo-text">
+                <p>Hospital</p>
+                <h1>The Protocol</h1>
+                <span>Cardiology</span>
+            </span>
+        </a>
+        <nav aria-label="Primary navigation">
+            <a href="../index.html">Home</a>
+            <a href="appointments.html">Appointments</a>
+            <a href="doctors.html">Doctors</a>
+            <a href="family-access.html" class="active" aria-current="page">Family Access</a>
+        </nav>
+    </header>
+
+    <main class="contact-main">
+        <section class="contact-hero">
+            <div>
+                <p class="contact-kicker">The Protocol · Family portal</p>
+                <h1>Stay close<br><em>to their care.</em></h1>
+                <p>Create a family account linked to the email on the patient's hospital record.</p>
+            </div>
+            <div class="contact-signal" aria-hidden="true">
+                <span class="contact-signal-core"></span>
+                <span class="contact-signal-ring contact-signal-ring-one"></span>
+                <span class="contact-signal-ring contact-signal-ring-two"></span>
+                <span class="contact-signal-ring contact-signal-ring-three"></span>
+            </div>
+        </section>
+
+        <div class="contact-content">
+            <section class="contact-form-section">
+                <p class="contact-eyebrow">Family access</p>
+                <h2>Create an account</h2>
+                <p>Enter your details and the patient's registered email to link the account.</p>
+                <form id="familySignupForm">
+                    <div class="form-group">
+                        <label for="signup-name">Your name</label>
+                        <input type="text" id="signup-name" name="signup-name" autocomplete="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="signup-email">Email</label>
+                        <input type="email" id="signup-email" name="signup-email" autocomplete="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="family-phone">Phone number</label>
+                        <input type="tel" id="family-phone" name="family-phone" autocomplete="tel" placeholder="0123456789" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="signup-password">Password</label>
+                        <input type="password" id="signup-password" name="signup-password" autocomplete="new-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="linked-patient-email">Patient's registered email</label>
+                        <input type="email" id="linked-patient-email" name="linked-patient-email" autocomplete="off" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="relationship">Relationship to patient</label>
+                        <input type="text" id="relationship" name="relationship" placeholder="Spouse, parent, child" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary contact-submit">Create Family Account</button>
+                    <div id="signupMessage" class="success-message" role="status" aria-live="polite"></div>
+                </form>
+            </section>
+
+            <aside class="contact-info-section">
+                <p class="contact-eyebrow">Before you begin</p>
+                <h2>Link the right record</h2>
+                <p>Use the email address already saved on the patient's hospital record. If it does not match, ask clinic staff to update the record first.</p>
+                <a class="protocol-cta-ghost" href="../index.html">Back to Home</a>
+            </aside>
+        </div>
+    </main>
+</body>
+</html>
