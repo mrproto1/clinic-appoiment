@@ -3532,6 +3532,41 @@ html {
     font-size: 0.86rem;
 }
 
+.family-access-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    margin: 0 0 24px;
+    padding: 4px;
+    border: 1px solid #d9e3df;
+    border-radius: 10px;
+    background: #edf2ef;
+}
+
+.family-access-tabs [role="tab"] {
+    min-height: 42px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: #526662;
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.family-access-tabs [role="tab"][aria-selected="true"] {
+    border-color: #dce7e2;
+    background: #fffdf8;
+    color: #15353a;
+    box-shadow: 0 2px 6px rgba(21, 53, 58, 0.08);
+}
+
+.family-access-tabs [role="tab"]:focus-visible {
+    outline: 3px solid rgba(15, 118, 110, 0.25);
+    outline-offset: 2px;
+}
+
 .contact-page .contact-form-section .form-group {
     margin-top: 18px;
 }
