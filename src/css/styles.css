@@ -2187,13 +2187,17 @@ html {
     font-family: 'Manrope', 'Segoe UI', sans-serif;
 }
 
+.faq-chat[hidden] {
+    display: none;
+}
+
 .faq-chat-panel[hidden] {
     display: none;
 }
 
 .faq-chat-panel {
     display: grid;
-    grid-template-rows: auto minmax(150px, 1fr) auto auto auto;
+    grid-template-rows: auto minmax(100px, 1fr) auto auto auto auto;
     width: min(380px, calc(100vw - 32px));
     max-height: min(590px, calc(100dvh - 108px));
     overflow: hidden;
@@ -2269,6 +2273,36 @@ html {
     align-self: flex-end;
     background: #15353a;
     color: #fff;
+}
+
+.faq-chat-consent {
+    display: grid;
+    gap: 10px;
+    padding: 0 14px 12px;
+}
+
+.faq-chat-consent label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: #526662;
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
+.faq-chat-consent input {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    margin: 1px 0 0;
+    accent-color: #0f766e;
+}
+
+.faq-chat-consent-error {
+    margin: 0;
+    color: #a12e2e;
+    font-size: 0.74rem;
+    font-weight: 700;
 }
 
 .faq-chat-suggestions {

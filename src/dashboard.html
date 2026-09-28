@@ -11,6 +11,7 @@
     <script src="js/runtime-config.js?v=20260726c" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
     <script src="js/dashboard.js?v=patient-api-20260928" defer></script>
+    <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
     <!-- SIDEBAR -->
@@ -509,6 +510,46 @@
             <p id="code-blue-overlay-message">Immediate assistance is required across the clinical team.</p>
             <button class="btn btn-secondary" onclick="dismissCodeBlueOverlay()">Acknowledge</button>
         </div>
+    </div>
+
+    <div class="faq-chat" id="faq-chat" data-family-only="true" hidden>
+        <section class="faq-chat-panel" id="faq-chat-panel" aria-label="Family health assistant" hidden>
+            <header class="faq-chat-header">
+                <div>
+                    <p class="faq-chat-eyebrow">THE PROTOCOL · FAMILY</p>
+                    <h2>Family health assistant</h2>
+                </div>
+                <button class="faq-chat-close" type="button" aria-label="Close assistant">×</button>
+            </header>
+            <div class="faq-chat-messages" id="faq-chat-messages" role="log" aria-live="polite" aria-relevant="additions">
+                <p class="faq-chat-message is-assistant">I can summarize the latest readings linked to your family account if you choose to share them. I can't diagnose or determine a patient's condition. Please don't include names or identifying details.</p>
+            </div>
+            <div class="faq-chat-consent">
+                <label>
+                    <input type="checkbox" id="faq-chat-family-consent">
+                    <span>I agree to send my message to OpenAI for an answer. I will not include names, IDs, or other identifying details.</span>
+                </label>
+                <label>
+                    <input type="checkbox" id="faq-chat-share-vitals">
+                    <span>Include the linked record's latest HR, BP, respiratory rate, SpO₂, temperature, and timestamp. I have permission to share these readings with OpenAI.</span>
+                </label>
+                <p class="faq-chat-consent-error" id="faq-chat-consent-error" role="alert" hidden>Please agree before sending a message.</p>
+            </div>
+            <div class="faq-chat-suggestions" aria-label="Suggested questions">
+                <button type="button" data-chat-suggestion="I'm worried about my family member. Can you summarize the readings I chose to share?">Summarize readings</button>
+                <button type="button" data-chat-suggestion="What should I do if I'm worried about my family member?">I'm worried</button>
+            </div>
+            <form class="faq-chat-form" id="faq-chat-form">
+                <label class="visually-hidden" for="faq-chat-input">Ask the family health assistant</label>
+                <input id="faq-chat-input" name="message" type="text" maxlength="1200" placeholder="Ask a general question…" autocomplete="off" required>
+                <button type="submit" aria-label="Send message">Send</button>
+            </form>
+            <p class="faq-chat-disclaimer">Not medical advice. No readings are shared unless selected. Contact the care team about health concerns.</p>
+        </section>
+        <button class="faq-chat-toggle" type="button" aria-expanded="false" aria-controls="faq-chat-panel">
+            <span class="faq-chat-toggle-mark" aria-hidden="true">✦</span>
+            <span>Ask about family health</span>
+        </button>
     </div>
 
     <script>

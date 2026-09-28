@@ -8,6 +8,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const messages = document.getElementById('faq-chat-messages');
     if (!widget || !panel || !toggle || !form || !input || !messages) return;
 
+    const familyMode = widget.dataset.familyOnly === 'true';
+    const familyConsent = document.getElementById('faq-chat-family-consent');
+    const shareVitals = document.getElementById('faq-chat-share-vitals');
+    const consentError = document.getElementById('faq-chat-consent-error');
+    if (familyMode) {
+        let currentUser = {};
+        try {
+            currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        } catch (_) {
+            currentUser = {};
+        }
+        if (currentUser.role !== 'family') return;
+        widget.hidden = false;
+    }
+
     const apiBase = window.APP_RUNTIME_CONFIG?.apiBase
         || window.__APP_API_BASE__
         || `${window.location.origin}/api`;
@@ -31,6 +46,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const trimmedQuestion = question.trim();
         if (!trimmedQuestion) return;
 
+        if (familyMode && !familyConsent?.checked) {
+            if (consentError) consentError.hidden = false;
+            return;
+        }
+        if (consentError) consentError.hidden = true;
+
         addMessage(trimmedQuestion, 'visitor');
         input.value = '';
         input.disabled = true;
@@ -38,10 +59,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const pendingMessage = addMessage('Thinking…', 'assistant');
 
         try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (familyMode) {
+                const authToken = localStorage.getItem('authToken');
+                if (!authToken) throw new Error('Please sign in to your family account again.');
+                headers.Authorization = `Bearer ${authToken}`;
+            }
+
             const response = await fetch(`${apiBase.replace(/\/+$/, '')}/chat`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: trimmedQuestion })
+                headers,
+                body: JSON.stringify({
+                    message: trimmedQuestion,
+                    familyMode,
+                    familyConsent: familyMode ? Boolean(familyConsent?.checked) : false,
+                    includePatientVitals: familyMode && Boolean(shareVitals?.checked)
+                })
             });
             const result = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(result.error || 'Assistant is unavailable right now.');

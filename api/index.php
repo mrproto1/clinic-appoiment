@@ -126,6 +126,42 @@ function handle_faq_chat($method, $segments, $body)
         respond(400, ['error' => 'Enter a message under 1,200 characters.']);
     }
 
+    $familyMode = !empty($body['familyMode']);
+    $includePatientVitals = !empty($body['includePatientVitals']);
+    $familyUser = null;
+    $recordedVitals = null;
+
+    if ($familyMode || $includePatientVitals) {
+        if (empty($body['familyConsent'])) {
+            respond(403, ['error' => 'Consent is required before using family support chat.']);
+        }
+
+        $familyUser = require_auth(['family']);
+    }
+
+    if ($includePatientVitals) {
+        $patient = find_patient_for_user($familyUser);
+        if (!$patient) {
+            respond(404, ['error' => 'No linked patient record was found for this family account.']);
+        }
+
+        $vitals = $patient['vitals'] ?? [];
+        $recordedVitals = array_filter([
+            'heartRateBpm' => isset($vitals['heartRate']) ? (int)$vitals['heartRate'] : null,
+            'bloodPressure' => $vitals['bloodPressure'] ?? null,
+            'respiratoryRatePerMinute' => isset($vitals['respiratoryRate']) ? (int)$vitals['respiratoryRate'] : null,
+            'oxygenSaturationPercent' => isset($vitals['oxygenSaturation']) ? (int)$vitals['oxygenSaturation'] : null,
+            'temperatureCelsius' => isset($vitals['temperature']) ? (float)$vitals['temperature'] : null,
+            'recordedAt' => $vitals['lastUpdated'] ?? null
+        ], function ($value) {
+            return $value !== null && $value !== '';
+        });
+
+        if (!$recordedVitals) {
+            respond(409, ['error' => 'No recorded vitals are available to share yet.']);
+        }
+    }
+
     $forwardedAddresses = explode(',', (string)($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''));
     $clientAddress = trim((string)($forwardedAddresses[0] ?? ''));
     if ($clientAddress === '') {
@@ -160,10 +196,15 @@ function handle_faq_chat($method, $segments, $body)
         respond(503, ['error' => 'The FAQ assistant is not configured yet.']);
     }
 
+    $modelInput = $message;
+    if ($recordedVitals !== null) {
+        $modelInput .= "\n\nLimited patient readings explicitly shared by the signed-in family member: " . json_encode($recordedVitals, JSON_UNESCAPED_SLASHES);
+    }
+
     $requestPayload = [
         'model' => 'gpt-4o-mini',
-        'instructions' => 'You are The Protocol Cardiology website FAQ and family support assistant. Answer briefly and empathetically in the language the visitor uses. Help with website navigation, appointments, specialists, Family Access, organ donor tributes, and general non-clinical support for worried family members. If a family member is worried about a patient, acknowledge the concern and encourage them to contact the patient\'s care team for individual guidance. Do not invent clinic hours, contact details, prices, or medical facts. If information is not present, direct the visitor to the Contact Us page or clinic staff. Never diagnose, interpret symptoms, recommend treatment, or interpret heart-rate/ECG readings. For urgent symptoms or immediate danger, tell the visitor to contact local emergency services or seek immediate medical care. Do not request personal, account, or health information. Remind visitors not to share patient details in this public chat.',
-        'input' => $message,
+        'instructions' => 'You are The Protocol Cardiology website FAQ and family support assistant. Answer briefly and empathetically in the language the visitor uses. Help with website navigation, appointments, specialists, Family Access, organ donor tributes, and general non-clinical support for worried family members. If limited recorded vitals are provided, repeat them accurately with their recorded timestamp and explain that you cannot determine the patient\'s condition from them. Never call a patient stable/unstable, diagnose, interpret symptoms, recommend treatment, or interpret heart-rate/ECG readings. Encourage families to contact the patient\'s care team for individual guidance. For urgent symptoms or immediate danger, direct them to local emergency services or immediate medical care. Do not invent clinic hours, contact details, prices, or medical facts. If information is unavailable, direct visitors to the Contact Us page or clinic staff. Do not ask for or expose names, emails, patient IDs, diagnosis, account details, or other identifying information. Use only the limited readings explicitly provided by the server.',
+        'input' => $modelInput,
         'max_output_tokens' => 220,
         'store' => false
     ];
