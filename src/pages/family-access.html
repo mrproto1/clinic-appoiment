@@ -13,6 +13,7 @@
     </script>
     <script src="../js/runtime-config.js?v=20260726c" defer></script>
     <script src="../js/auth.js?v=20260726c" defer></script>
+    <script src="../js/faq-chat.js?v=20260928-family" defer></script>
 </head>
 <body class="contact-page">
     <header class="contact-nav">
@@ -90,5 +91,33 @@
             </aside>
         </div>
     </main>
+    <div class="faq-chat" id="faq-chat">
+        <section class="faq-chat-panel" id="faq-chat-panel" aria-label="Family support assistant" hidden>
+            <header class="faq-chat-header">
+                <div>
+                    <p class="faq-chat-eyebrow">THE PROTOCOL · FAMILY</p>
+                    <h2>Family support</h2>
+                </div>
+                <button class="faq-chat-close" type="button" aria-label="Close assistant">×</button>
+            </header>
+            <div class="faq-chat-messages" id="faq-chat-messages" role="log" aria-live="polite" aria-relevant="additions">
+                <p class="faq-chat-message is-assistant">I can help with Family Access and general questions. If you're worried about your loved one's condition, contact their care team. For an emergency, call local emergency services. Please don't share names, records, or medical details here.</p>
+            </div>
+            <div class="faq-chat-suggestions" aria-label="Suggested questions">
+                <button type="button" data-chat-suggestion="I'm worried about my family member. What should I do?">I'm worried</button>
+                <button type="button" data-chat-suggestion="How can I access my family member's updates?">Access updates</button>
+            </div>
+            <form class="faq-chat-form" id="faq-chat-form">
+                <label class="visually-hidden" for="faq-chat-input">Ask a family support question</label>
+                <input id="faq-chat-input" name="message" type="text" maxlength="1200" placeholder="Ask a general question…" autocomplete="off" required>
+                <button type="submit" aria-label="Send message">Send</button>
+            </form>
+            <p class="faq-chat-disclaimer">Not medical advice. Contact the care team about health concerns.</p>
+        </section>
+        <button class="faq-chat-toggle" type="button" aria-expanded="false" aria-controls="faq-chat-panel">
+            <span class="faq-chat-toggle-mark" aria-hidden="true">✦</span>
+            <span>Need family support?</span>
+        </button>
+    </div>
 </body>
 </html>
