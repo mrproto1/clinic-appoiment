@@ -168,11 +168,20 @@ function redirectToDashboard(role) {
 
     const targetPath = dashboardMap[role] || 'index.html';
     const normalizedTargetPath = targetPath.replace(/^\/+/, '');
-    const destination = `${getAppBasePath()}${normalizedTargetPath}`;
+    let destination;
 
-    window.location.href = window.location.protocol === 'file:'
-        ? `./${normalizedTargetPath}`
-        : destination;
+    if (window.location.protocol === 'file:') {
+        const currentUrl = window.location.href;
+        const srcIndex = currentUrl.indexOf('/src/');
+        destination = srcIndex >= 0
+            ? `${currentUrl.substring(0, srcIndex)}/src/${normalizedTargetPath}`
+            : new URL(normalizedTargetPath, currentUrl).href;
+    } else {
+        const projectBasePath = getProjectBasePath().replace(/\/+$/, '');
+        destination = `${projectBasePath}/${normalizedTargetPath}`;
+    }
+
+    window.location.href = destination;
 }
 
 function showLoginSuccess(name, role) {
