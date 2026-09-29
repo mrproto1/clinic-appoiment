@@ -979,7 +979,10 @@ async function sendFamilyHospitalAlert(patientId, button) {
 
         const inAppMessage = `Urgent in-app alert sent to ${result.recipientCount} linked family account(s).`;
         if (result.emailRequested && result.emailFailedCount > 0) {
-            showNotification(`${inAppMessage} Email accepted: ${result.emailAcceptedCount}; not sent: ${result.emailFailedCount}.`, 'warning');
+            const failureDetails = Array.isArray(result.emailFailureReasons) && result.emailFailureReasons.length
+                ? ` ${result.emailFailureReasons.join('; ')}`
+                : '';
+            showNotification(`${inAppMessage} Email accepted: ${result.emailAcceptedCount}; not sent: ${result.emailFailedCount}.${failureDetails}`, 'warning');
         } else if (result.emailRequested) {
             showNotification(`${inAppMessage} Bird accepted ${result.emailAcceptedCount} email(s) for delivery.`, 'success');
         } else {
