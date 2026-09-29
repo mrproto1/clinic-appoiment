@@ -821,6 +821,71 @@ function handle_patient_routes($method, $segments, $body)
         respond(200, $patients);
     }
 
+    if ($method === 'POST' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'family-alert') {
+        if (($user['role'] ?? '') !== 'doctor') {
+            respond(403, ['error' => 'Only the assigned doctor can alert this patient\'s family']);
+        }
+
+        $patientId = (int)$segments[1];
+        $patient = find_by_id('patients', $patientId);
+        if (!$patient) {
+            respond(404, ['error' => 'Patient not found']);
+        }
+
+        $doctorIds = get_doctor_alias_ids((int)$user['id']);
+        if (!in_array((int)($patient['assignedDoctor'] ?? 0), $doctorIds, true)) {
+            respond(403, ['error' => 'You can only alert family for a patient assigned to you']);
+        }
+
+        $messages = read_data('messages');
+        foreach ($messages as $existingMessage) {
+            $metadata = $existingMessage['metadata'] ?? [];
+            if (($existingMessage['type'] ?? '') === 'family-hospital-alert'
+                && (int)($metadata['patientId'] ?? 0) === $patientId
+                && strtotime((string)($existingMessage['timestamp'] ?? '')) > time() - 300) {
+                respond(429, ['error' => 'A family hospital alert was already sent for this patient in the last five minutes']);
+            }
+        }
+
+        $linkedFamilies = [];
+        foreach (read_data('users') as $familyUser) {
+            if (($familyUser['role'] ?? '') !== 'family') {
+                continue;
+            }
+
+            $linkedPatient = find_patient_for_user($familyUser);
+            if ($linkedPatient && (int)($linkedPatient['id'] ?? 0) === $patientId) {
+                $linkedFamilies[] = $familyUser;
+            }
+        }
+
+        if (empty($linkedFamilies)) {
+            respond(409, ['error' => 'No family accounts are linked to this patient']);
+        }
+
+        $patientName = trim((string)($patient['name'] ?? 'your family member'));
+        $content = "URGENT: Please come to the hospital now. Dr. {$user['name']} has requested family presence because {$patientName}'s health has deteriorated significantly. Please contact the care team for instructions.";
+        foreach ($linkedFamilies as $familyUser) {
+            add_row('messages', [
+                'senderId' => (int)$user['id'],
+                'senderName' => (string)($user['name'] ?? 'Doctor'),
+                'recipientId' => (int)$familyUser['id'],
+                'groupId' => null,
+                'content' => $content,
+                'type' => 'family-hospital-alert',
+                'title' => 'Urgent: Please come to the hospital',
+                'metadata' => ['patientId' => $patientId],
+                'timestamp' => gmdate('c'),
+                'read' => false
+            ]);
+        }
+
+        respond(201, [
+            'message' => 'Urgent hospital alert sent to linked family accounts',
+            'recipientCount' => count($linkedFamilies)
+        ]);
+    }
+
     if ($method === 'GET' && count($segments) === 2 && $segments[1] === 'me') {
         if (!in_array(($user['role'] ?? ''), ['patient', 'family'], true)) {
             respond(403, ['error' => 'Insufficient permissions']);

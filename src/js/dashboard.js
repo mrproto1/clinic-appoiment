@@ -18,6 +18,7 @@ let patientVitalsAlertSignature = '';
 let doctorVitalsHistoryByPatient = {};
 let doctorEcgStateByPatient = {};
 const familyDemoVitalsByPatient = new Map();
+let familyHospitalAlertSignature = '';
 const MAX_RECONNECT_ATTEMPTS = 5;
 const CODE_BLUE_POLL_MS = 1000;
 const MAX_PATIENT_HISTORY_POINTS = 18;
@@ -946,12 +947,43 @@ function displayDoctorPatients(patients) {
                     <button class="btn btn-small btn-primary" onclick="openPatientDetail(${patient.id})">View Details</button>
                     <button class="btn btn-small btn-secondary" onclick="openDoctorChat(${patient.id})">Message Staff</button>
                     <button class="btn btn-small btn-secondary" onclick="printPatientReport(${patient.id})">Print Report</button>
+                    <button class="btn btn-small btn-danger" onclick="sendFamilyHospitalAlert(${patient.id}, this)" title="Notify every linked family account to come to the hospital">Alert family</button>
                     <button class="btn btn-small btn-danger" onclick="deletePatientRecord(${patient.id}, '${(patient.patientCode || '').replace(/'/g, "\\'")}')">Delete</button>
                     <button class="btn btn-small btn-danger" onclick="openCodeBluePrompt(${patient.id})">Code Blue</button>
                 </div>
             </div>
         `;
     }).join('');
+}
+
+async function sendFamilyHospitalAlert(patientId, button) {
+    const confirmed = window.confirm('Send an urgent alert to every family account linked to this patient, asking them to come to the hospital now? Use only after assessing a serious deterioration.');
+    if (!confirmed) return;
+
+    button.disabled = true;
+    const originalLabel = button.textContent;
+    button.textContent = 'Sending...';
+    try {
+        const response = await apiCall(`/patients/${patientId}/family-alert`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+        if (!response) return;
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            showNotification(result.error || 'Unable to alert the family.', 'danger');
+            return;
+        }
+
+        showNotification(`Urgent alert sent to ${result.recipientCount} linked family account(s).`, 'success');
+    } catch (error) {
+        console.error('Error sending family hospital alert:', error);
+        showNotification('Unable to send the family alert right now.', 'danger');
+    } finally {
+        button.disabled = false;
+        button.textContent = originalLabel;
+    }
 }
 
 function buildDoctorHrTrendSvg(patientId, heartRate) {
@@ -1974,7 +2006,10 @@ async function loadFamilyDashboard() {
     if (!container) return;
 
     try {
-        const response = await apiCall('/patients/me');
+        const [response, messagesResponse] = await Promise.all([
+            apiCall('/patients/me'),
+            apiCall('/messages')
+        ]);
         if (!response || !response.ok) {
             container.innerHTML = `
                 <div class="card">
@@ -1986,6 +2021,11 @@ async function loadFamilyDashboard() {
         }
 
         const patient = await response.json();
+        const messages = messagesResponse && messagesResponse.ok ? await messagesResponse.json() : [];
+        renderFamilyHospitalAlerts((Array.isArray(messages) ? messages : []).filter((message) =>
+            message.type === 'family-hospital-alert'
+            && Number(message.metadata?.patientId) === Number(patient.id)
+        ));
         patientAssignedDoctorId = Number(patient.assignedDoctor) || null;
         renderPatientHealthPanel(patient, 'family-content');
     } catch (error) {
@@ -1997,6 +2037,36 @@ async function loadFamilyDashboard() {
             </div>
         `;
     }
+}
+
+function renderFamilyHospitalAlerts(alerts) {
+    const container = document.getElementById('family-urgent-alerts');
+    if (!container) return;
+
+    const latestAlerts = alerts
+        .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+        .slice(0, 5);
+    const signature = latestAlerts.map((alert) => `${alert.id}:${alert.read ? 1 : 0}`).join('|');
+    if (signature === familyHospitalAlertSignature) return;
+    familyHospitalAlertSignature = signature;
+    container.replaceChildren();
+
+    latestAlerts.forEach((alert) => {
+        const item = document.createElement('article');
+        item.className = 'family-hospital-alert';
+        item.setAttribute('role', 'alert');
+
+        const title = document.createElement('h2');
+        title.textContent = alert.title || 'Urgent: please come to the hospital';
+        const content = document.createElement('p');
+        content.textContent = alert.content || 'The doctor has requested that family come to the hospital now.';
+        const timestamp = document.createElement('time');
+        timestamp.dateTime = alert.timestamp || '';
+        timestamp.textContent = alert.timestamp ? new Date(alert.timestamp).toLocaleString() : '';
+
+        item.append(title, content, timestamp);
+        container.append(item);
+    });
 }
 
 function buildPatientHeartRateHistory(patient) {

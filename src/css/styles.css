@@ -1198,6 +1198,40 @@ nav li {
     font-size: 0.84rem;
 }
 
+.family-urgent-alert-list {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.family-hospital-alert {
+    border: 1px solid #d58b27;
+    border-left: 6px solid #b84332;
+    border-radius: 8px;
+    padding: 16px 18px;
+    background: #fff6e8;
+    color: #482c1f;
+    box-shadow: 0 8px 22px rgba(72, 44, 31, 0.08);
+}
+
+.family-hospital-alert h2 {
+    margin: 0 0 7px;
+    color: #812c24;
+    font-size: 1.1rem;
+}
+
+.family-hospital-alert p {
+    margin: 0;
+    line-height: 1.55;
+}
+
+.family-hospital-alert time {
+    display: block;
+    margin-top: 9px;
+    color: #765d4c;
+    font-size: 0.78rem;
+}
+
 .chart-legend-inline {
     margin-top: 10px;
     display: flex;
