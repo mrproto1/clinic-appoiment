@@ -865,6 +865,10 @@ function handle_patient_routes($method, $segments, $body)
 
         $patientName = trim((string)($patient['name'] ?? 'your family member'));
         $content = "URGENT: Please come to the hospital now. Dr. {$user['name']} has requested family presence because {$patientName}'s health has deteriorated significantly. Please contact the care team for instructions.";
+        $sendSms = !empty($body['sendSms']);
+        $smsAcceptedCount = 0;
+        $smsFailedCount = 0;
+        $smsFailureReasons = [];
         foreach ($linkedFamilies as $familyUser) {
             add_row('messages', [
                 'senderId' => (int)$user['id'],
@@ -878,11 +882,36 @@ function handle_patient_routes($method, $segments, $body)
                 'timestamp' => gmdate('c'),
                 'read' => false
             ]);
+
+            if ($sendSms) {
+                $phone = normalize_bird_sms_phone((string)($familyUser['phone'] ?? ''));
+                if ($phone === '') {
+                    $smsFailedCount++;
+                    $smsFailureReasons[] = 'A linked family account has no valid mobile number';
+                    continue;
+                }
+
+                $smsResult = send_bird_sms(
+                    $phone,
+                    'URGENT: The Protocol care team asks you to come to the hospital now to support your family member. Please contact the care team when you arrive. For immediate danger, call local emergency services.',
+                    'family-alert-' . $patientId . '-' . (int)$familyUser['id'] . '-' . time()
+                );
+                if ($smsResult['accepted']) {
+                    $smsAcceptedCount++;
+                } else {
+                    $smsFailedCount++;
+                    $smsFailureReasons[] = $smsResult['error'];
+                }
+            }
         }
 
         respond(201, [
             'message' => 'Urgent hospital alert sent to linked family accounts',
-            'recipientCount' => count($linkedFamilies)
+            'recipientCount' => count($linkedFamilies),
+            'smsRequested' => $sendSms,
+            'smsAcceptedCount' => $smsAcceptedCount,
+            'smsFailedCount' => $smsFailedCount,
+            'smsFailureReasons' => array_values(array_unique($smsFailureReasons))
         ]);
     }
 
@@ -1134,6 +1163,71 @@ function handle_patient_routes($method, $segments, $body)
     }
 
     respond(404, ['error' => 'Route not found']);
+}
+
+function normalize_bird_sms_phone($phone)
+{
+    $phone = trim($phone);
+    if ($phone === '') {
+        return '';
+    }
+
+    $digits = preg_replace('/\D+/', '', $phone);
+    if (strpos($digits, '00') === 0) {
+        $digits = substr($digits, 2);
+    } elseif (strpos($digits, '0') === 0) {
+        $countryCode = preg_replace('/\D+/', '', (string)(getenv('BIRD_DEFAULT_COUNTRY_CODE') ?: '60'));
+        $digits = $countryCode . substr($digits, 1);
+    }
+
+    if (!preg_match('/^[1-9]\d{7,14}$/', $digits)) {
+        return '';
+    }
+
+    return '+' . $digits;
+}
+
+function send_bird_sms($phone, $text, $idempotencyKey)
+{
+    $apiKey = trim((string)getenv('BIRD_API_KEY'));
+    $sender = trim((string)getenv('BIRD_SMS_FROM'));
+    if ($apiKey === '' || $sender === '') {
+        return ['accepted' => false, 'error' => 'Bird SMS is not configured (BIRD_API_KEY or BIRD_SMS_FROM missing)'];
+    }
+
+    if (!preg_match('/^bk_([a-z]{2}\d+)_/', $apiKey, $matches)) {
+        return ['accepted' => false, 'error' => 'Bird API key has an unsupported format'];
+    }
+    $region = $matches[1];
+    $payload = [
+        'to' => $phone,
+        'from' => $sender,
+        'text' => $text,
+        'category' => 'transactional',
+        'options' => ['smart_encoding' => true]
+    ];
+    $httpContext = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\nAccept: application/json\r\nAuthorization: Bearer {$apiKey}\r\nIdempotency-Key: {$idempotencyKey}\r\n",
+            'content' => json_encode($payload, JSON_UNESCAPED_SLASHES),
+            'timeout' => 20,
+            'ignore_errors' => true
+        ]
+    ]);
+    $responseBody = @file_get_contents("https://{$region}.platform.bird.com/v1/sms/messages", false, $httpContext);
+    $statusCode = 0;
+    foreach ($http_response_header ?? [] as $header) {
+        if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $statusMatches)) {
+            $statusCode = (int)$statusMatches[1];
+        }
+    }
+
+    if ($responseBody !== false && $statusCode >= 200 && $statusCode < 300) {
+        return ['accepted' => true, 'error' => ''];
+    }
+
+    return ['accepted' => false, 'error' => 'Bird did not accept one SMS (HTTP ' . ($statusCode ?: 'network error') . ')'];
 }
 
 function handle_user_routes($method, $segments, $body)
