@@ -1211,7 +1211,19 @@ function send_bird_email($recipientEmail, $subject, $text, $idempotencyKey)
         return ['accepted' => true, 'error' => ''];
     }
 
-    return ['accepted' => false, 'error' => 'Bird did not accept one email (HTTP ' . ($statusCode ?: 'network error') . ')'];
+    $errorData = json_decode((string)$responseBody, true);
+    $errorCode = trim((string)($errorData['code'] ?? $errorData['error']['code'] ?? ''));
+    $errorMessage = trim((string)($errorData['message'] ?? $errorData['error']['message'] ?? ''));
+    $errorMessage = substr(preg_replace('/\s+/', ' ', strip_tags($errorMessage)), 0, 240);
+    $errorSummary = 'Bird did not accept one email (HTTP ' . ($statusCode ?: 'network error') . ')';
+    if ($errorCode !== '') {
+        $errorSummary .= ' [' . substr($errorCode, 0, 60) . ']';
+    }
+    if ($errorMessage !== '') {
+        $errorSummary .= ': ' . $errorMessage;
+    }
+
+    return ['accepted' => false, 'error' => $errorSummary];
 }
 
 function handle_user_routes($method, $segments, $body)
