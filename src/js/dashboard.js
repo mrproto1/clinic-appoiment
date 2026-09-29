@@ -959,7 +959,7 @@ function displayDoctorPatients(patients) {
 async function sendFamilyHospitalAlert(patientId, button) {
     const confirmed = window.confirm('Send an urgent alert to every family account linked to this patient, asking them to come to the hospital now? Use only after assessing a serious deterioration.');
     if (!confirmed) return;
-    const sendSms = window.confirm('Also send a paid SMS to linked family phone numbers? Bird SMS charges may apply. Select Cancel to send the in-app alert only.');
+    const sendEmail = window.confirm('Also send an email to linked family accounts? Bird email plan limits or charges may apply. Select Cancel to send the in-app alert only.');
 
     button.disabled = true;
     const originalLabel = button.textContent;
@@ -967,7 +967,7 @@ async function sendFamilyHospitalAlert(patientId, button) {
     try {
         const response = await apiCall(`/patients/${patientId}/family-alert`, {
             method: 'POST',
-            body: JSON.stringify({ sendSms })
+            body: JSON.stringify({ sendEmail })
         });
         if (!response) return;
 
@@ -978,10 +978,10 @@ async function sendFamilyHospitalAlert(patientId, button) {
         }
 
         const inAppMessage = `Urgent in-app alert sent to ${result.recipientCount} linked family account(s).`;
-        if (result.smsRequested && result.smsFailedCount > 0) {
-            showNotification(`${inAppMessage} SMS accepted: ${result.smsAcceptedCount}; not sent: ${result.smsFailedCount}.`, 'warning');
-        } else if (result.smsRequested) {
-            showNotification(`${inAppMessage} Bird accepted ${result.smsAcceptedCount} SMS for delivery; acceptance is not delivery confirmation.`, 'success');
+        if (result.emailRequested && result.emailFailedCount > 0) {
+            showNotification(`${inAppMessage} Email accepted: ${result.emailAcceptedCount}; not sent: ${result.emailFailedCount}.`, 'warning');
+        } else if (result.emailRequested) {
+            showNotification(`${inAppMessage} Bird accepted ${result.emailAcceptedCount} email(s) for delivery.`, 'success');
         } else {
             showNotification(inAppMessage, 'success');
         }
