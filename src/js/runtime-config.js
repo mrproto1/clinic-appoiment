@@ -28,8 +28,11 @@ window.applySiteMourningMode = function applySiteMourningMode(siteStatus) {
     document.body.classList.toggle('mourning-mode', active);
 
     const existingBanner = document.getElementById('site-mourning-banner');
+    const existingDialog = document.getElementById('site-mourning-dialog');
     if (!active) {
         existingBanner?.remove();
+        existingDialog?.close();
+        existingDialog?.remove();
         return;
     }
 
@@ -55,6 +58,46 @@ window.applySiteMourningMode = function applySiteMourningMode(siteStatus) {
     if (!existingBanner) {
         document.body.prepend(banner);
     }
+
+    const revision = siteStatus.updatedAt || `${siteStatus.memorialName || ''}:${siteStatus.notice || ''}`;
+    const popupKey = `mourningNoticeSeen:${revision}`;
+    try {
+        if (sessionStorage.getItem(popupKey)) return;
+        sessionStorage.setItem(popupKey, '1');
+    } catch (_) {
+        return;
+    }
+
+    const dialog = document.createElement('dialog');
+    dialog.id = 'site-mourning-dialog';
+    dialog.className = 'site-mourning-dialog';
+    dialog.setAttribute('aria-labelledby', 'site-mourning-dialog-title');
+    const frame = document.createElement('div');
+    frame.className = 'site-mourning-dialog-frame';
+    const kicker = document.createElement('p');
+    kicker.className = 'site-mourning-dialog-kicker';
+    kicker.textContent = 'A moment of remembrance';
+    const heading = document.createElement('h2');
+    heading.id = 'site-mourning-dialog-title';
+    heading.textContent = siteStatus.memorialName || 'In Memoriam';
+    frame.append(kicker, heading);
+    if (siteStatus.notice) {
+        const notice = document.createElement('p');
+        notice.className = 'site-mourning-dialog-notice';
+        notice.textContent = siteStatus.notice;
+        frame.append(notice);
+    }
+    const close = document.createElement('button');
+    close.className = 'site-mourning-dialog-close';
+    close.type = 'button';
+    close.textContent = 'Continue';
+    close.addEventListener('click', () => dialog.close());
+    frame.append(close);
+    dialog.append(frame);
+    dialog.addEventListener('close', () => dialog.remove(), { once: true });
+    document.body.append(dialog);
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
 };
 
 fetch(`${window.APP_RUNTIME_CONFIG.apiBase.replace(/\/+$/, '')}/site-status`, { cache: 'no-store' })

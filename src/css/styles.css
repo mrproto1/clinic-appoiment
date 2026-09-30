@@ -8,17 +8,20 @@
     --primary-color: #2563eb;
     --secondary-color: #1d4ed8;
     --accent-color: #7c3aed;
-    --success-color: #16a34a;
-    --danger-color: #dc2626;
-    --warning-color: #ea580c;
-    --info-color: #0891b2;
+    padding: 14px 22px;
+    border-bottom: 2px solid #9c8974;
+    background: #171819;
+    color: #f2f0eb;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
     --light-gray: #f8fafc;
     --border-gray: #e2e8f0;
     --dark-gray: #334155;
     --text-dark: #0f172a;
     --text-light: #64748b;
     --surface: #ffffff;
-    --surface-alt: #f8fbff;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 1.2rem;
+    font-weight: 700;
     --shadow-sm: 0 14px 35px rgba(15, 23, 42, 0.06);
     --shadow-md: 0 24px 60px rgba(15, 23, 42, 0.10);
     --radius-lg: 20px;
@@ -1241,10 +1244,11 @@ nav li {
     align-items: center;
     gap: 10px 18px;
     flex-wrap: wrap;
-    padding: 12px 20px;
-    border-bottom: 1px solid #777;
-    background: #171717;
-    color: #fff;
+    padding: 14px 22px;
+    border-bottom: 2px solid #9c8974;
+    background: #171819;
+    color: #f2f0eb;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
     text-align: center;
     font-size: 0.9rem;
     line-height: 1.45;
@@ -1252,11 +1256,118 @@ nav li {
 
 .site-mourning-banner strong {
     color: #fff;
-    font-weight: 800;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 1.2rem;
+    font-weight: 700;
 }
 
-body.mourning-mode > :not(#site-mourning-banner) {
-    filter: grayscale(1);
+.site-mourning-banner span {
+    max-width: 760px;
+    color: #d0ceca;
+}
+
+.site-mourning-dialog {
+    width: min(540px, calc(100vw - 36px));
+    max-width: none;
+    padding: 0;
+    overflow: visible;
+    border: 1px solid #b7afa3;
+    border-radius: 10px;
+    background: #f5f4f1;
+    color: #252728;
+    box-shadow: 0 28px 90px rgba(0, 0, 0, 0.36);
+}
+
+.site-mourning-dialog::backdrop {
+    background: rgba(12, 14, 15, 0.78);
+    backdrop-filter: blur(4px);
+}
+
+.site-mourning-dialog[open] {
+    animation: mourningDialogEnter 280ms ease-out both;
+}
+
+.site-mourning-dialog-frame {
+    padding: 42px clamp(24px, 6vw, 52px) 32px;
+    text-align: center;
+}
+
+.site-mourning-dialog-frame::before,
+.site-mourning-dialog-frame::after {
+    display: block;
+    width: 54px;
+    height: 1px;
+    margin: 0 auto 18px;
+    background: #a58d73;
+    content: '';
+}
+
+.site-mourning-dialog-kicker {
+    margin: 0 0 10px;
+    color: #756250;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.site-mourning-dialog h2 {
+    margin: 0;
+    color: #171819;
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: clamp(2rem, 8vw, 3rem);
+    font-weight: 600;
+    line-height: 1;
+}
+
+.site-mourning-dialog-notice {
+    max-width: 410px;
+    margin: 18px auto 24px;
+    color: #4f5151;
+    font-size: 0.95rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+}
+
+.site-mourning-dialog-close {
+    min-height: 44px;
+    border: 1px solid #171819;
+    border-radius: 4px;
+    padding: 0 24px;
+    background: #171819;
+    color: #fff;
+    font: inherit;
+    font-size: 0.84rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.site-mourning-dialog-close:hover {
+    background: #3b3c3b;
+}
+
+@keyframes mourningDialogEnter {
+    from { opacity: 0; transform: translateY(8px) scale(0.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .site-mourning-dialog[open] { animation: none; }
+}
+
+body.mourning-mode > :not(#site-mourning-banner):not(.site-mourning-dialog) {
+    filter: grayscale(0.9) contrast(0.98);
+}
+
+@media (max-width: 600px) {
+    .site-mourning-banner {
+        flex-direction: column;
+        gap: 3px;
+        padding: 12px 16px;
+    }
+
+    .site-mourning-dialog-frame {
+        padding-top: 34px;
+    }
 }
 
 .bulletin-main {

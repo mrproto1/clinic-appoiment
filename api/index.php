@@ -1875,7 +1875,8 @@ function handle_site_status_routes($method, $segments, $body)
         respond(200, [
             'mourningMode' => !empty($current['mourningMode']),
             'memorialName' => (string)($current['memorialName'] ?? ''),
-            'notice' => (string)($current['notice'] ?? '')
+            'notice' => (string)($current['notice'] ?? ''),
+            'updatedAt' => (string)($current['updatedAt'] ?? '')
         ]);
     }
 
@@ -1913,7 +1914,8 @@ function handle_site_status_routes($method, $segments, $body)
         'siteStatus' => [
             'mourningMode' => !empty($saved['mourningMode']),
             'memorialName' => (string)($saved['memorialName'] ?? ''),
-            'notice' => (string)($saved['notice'] ?? '')
+            'notice' => (string)($saved['notice'] ?? ''),
+            'updatedAt' => (string)($saved['updatedAt'] ?? '')
         ]
     ]);
 }
