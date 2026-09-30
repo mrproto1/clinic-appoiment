@@ -32,6 +32,10 @@ window.applySiteMourningMode = function applySiteMourningMode(siteStatus) {
         existingDialog?.remove();
         return;
     }
+    if (existingDialog) {
+        existingDialog.close();
+        existingDialog.remove();
+    }
 
     const revision = siteStatus.updatedAt || `${siteStatus.memorialName || ''}:${siteStatus.notice || ''}`;
     const popupKey = `mourningNoticeSeen:${revision}`;
