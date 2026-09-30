@@ -26,36 +26,11 @@ window.APP_RUNTIME_CONFIG = window.APP_RUNTIME_CONFIG || (function buildRuntimeC
 window.applySiteMourningMode = function applySiteMourningMode(siteStatus) {
     const active = Boolean(siteStatus && siteStatus.mourningMode);
 
-    const existingBanner = document.getElementById('site-mourning-banner');
     const existingDialog = document.getElementById('site-mourning-dialog');
     if (!active) {
-        existingBanner?.remove();
         existingDialog?.close();
         existingDialog?.remove();
         return;
-    }
-
-    const banner = existingBanner || document.createElement('aside');
-    banner.id = 'site-mourning-banner';
-    banner.className = 'site-mourning-banner';
-    banner.setAttribute('role', 'status');
-    banner.setAttribute('aria-live', 'polite');
-    banner.replaceChildren();
-
-    const title = document.createElement('strong');
-    title.textContent = siteStatus.memorialName
-        ? `In Memoriam · ${siteStatus.memorialName}`
-        : 'In Memoriam';
-    banner.append(title);
-
-    if (siteStatus.notice) {
-        const notice = document.createElement('span');
-        notice.textContent = siteStatus.notice;
-        banner.append(notice);
-    }
-
-    if (!existingBanner) {
-        document.body.prepend(banner);
     }
 
     const revision = siteStatus.updatedAt || `${siteStatus.memorialName || ''}:${siteStatus.notice || ''}`;
