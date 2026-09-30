@@ -1236,29 +1236,40 @@ nav li {
 }
 
 .site-mourning-dialog {
-    width: min(440px, calc(100vw - 32px));
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
     max-width: none;
-    max-height: calc(100dvh - 32px);
+    max-height: none;
+    margin: 0;
     padding: 0;
-    overflow: auto;
-    border: 1px solid #b7afa3;
-    border-radius: 10px;
-    background: #f5f4f1;
-    color: #252728;
-    box-shadow: 0 28px 90px rgba(0, 0, 0, 0.36);
+    overflow: hidden auto;
+    border: 0;
+    border-radius: 0;
+    background: #171819;
+    color: #f2f0eb;
+    box-shadow: none;
 }
 
 .site-mourning-dialog::backdrop {
-    background: rgba(12, 14, 15, 0.78);
-    backdrop-filter: blur(4px);
+    background: #171819;
 }
 
 .site-mourning-dialog[open] {
-    animation: mourningDialogEnter 280ms ease-out both;
+    animation: mourningDialogEnter 240ms ease-out both;
 }
 
 .site-mourning-dialog-frame {
-    padding: 32px clamp(20px, 4vw, 36px) 24px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: min(760px, 100%);
+    min-height: 100%;
+    margin: 0 auto;
+    padding: clamp(32px, 8vh, 80px) clamp(24px, 7vw, 72px);
     text-align: center;
 }
 
@@ -1268,13 +1279,13 @@ nav li {
     width: 54px;
     height: 1px;
     margin: 0 auto 18px;
-    background: #a58d73;
+    background: #a89a87;
     content: '';
 }
 
 .site-mourning-dialog-kicker {
     margin: 0 0 10px;
-    color: #756250;
+    color: #c5b9a9;
     font-size: 0.72rem;
     font-weight: 800;
     text-transform: uppercase;
@@ -1282,9 +1293,9 @@ nav li {
 
 .site-mourning-dialog h2 {
     margin: 0;
-    color: #171819;
+    color: #f4f2ed;
     font-family: 'Cormorant Garamond', Georgia, serif;
-    font-size: clamp(1.75rem, 5vw, 2.3rem);
+    font-size: clamp(1.5rem, 3vw, 2rem);
     font-weight: 600;
     line-height: 1;
 }
@@ -1292,7 +1303,7 @@ nav li {
 .site-mourning-dialog-notice {
     max-width: 360px;
     margin: 14px auto 18px;
-    color: #4f5151;
+    color: #d0ceca;
     font-size: 0.95rem;
     line-height: 1.7;
     white-space: pre-wrap;
@@ -1300,11 +1311,11 @@ nav li {
 
 .site-mourning-dialog-close {
     min-height: 44px;
-    border: 1px solid #171819;
-    border-radius: 4px;
+    border: 1px solid #8f8b84;
+    border-radius: 3px;
     padding: 0 24px;
-    background: #171819;
-    color: #fff;
+    background: transparent;
+    color: #f4f2ed;
     font: inherit;
     font-size: 0.84rem;
     font-weight: 700;
@@ -1312,12 +1323,12 @@ nav li {
 }
 
 .site-mourning-dialog-close:hover {
-    background: #3b3c3b;
+    background: #303233;
 }
 
 @keyframes mourningDialogEnter {
-    from { opacity: 0; transform: translateY(8px) scale(0.985); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1326,7 +1337,7 @@ nav li {
 
 @media (max-width: 600px) {
     .site-mourning-dialog-frame {
-        padding-top: 28px;
+        padding: 28px 22px;
     }
 }
 
