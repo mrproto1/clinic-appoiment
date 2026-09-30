@@ -948,12 +948,44 @@ function displayDoctorPatients(patients) {
                     <button class="btn btn-small btn-secondary" onclick="openDoctorChat(${patient.id})">Message Staff</button>
                     <button class="btn btn-small btn-secondary" onclick="printPatientReport(${patient.id})">Print Report</button>
                     <button class="btn btn-small btn-danger" onclick="sendFamilyHospitalAlert(${patient.id}, this)" title="Notify every linked family account to come to the hospital">Alert family</button>
+                    <button class="btn btn-small btn-primary" onclick="completePatientCase(${patient.id}, this)">Case complete</button>
                     <button class="btn btn-small btn-danger" onclick="deletePatientRecord(${patient.id}, '${(patient.patientCode || '').replace(/'/g, "\\'")}')">Delete</button>
                     <button class="btn btn-small btn-danger" onclick="openCodeBluePrompt(${patient.id})">Code Blue</button>
                 </div>
             </div>
         `;
     }).join('');
+}
+
+async function completePatientCase(patientId, button) {
+    const confirmed = window.confirm('Complete and discharge this patient? This will permanently delete all family accounts linked to this patient. The patient record will remain, but family access cannot be recovered.');
+    if (!confirmed) return;
+
+    button.disabled = true;
+    const originalLabel = button.textContent;
+    button.textContent = 'Completing...';
+    try {
+        const response = await apiCall(`/patients/${patientId}/case-complete`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+        if (!response) return;
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            showNotification(result.error || 'Unable to complete this patient case.', 'danger');
+            return;
+        }
+
+        showNotification(`Patient discharged. ${result.familyAccountsDeleted || 0} linked family account(s) deleted.`, 'success');
+        await loadDoctorDashboard();
+    } catch (error) {
+        console.error('Error completing patient case:', error);
+        showNotification('Unable to complete this patient case right now.', 'danger');
+    } finally {
+        button.disabled = false;
+        button.textContent = originalLabel;
+    }
 }
 
 async function sendFamilyHospitalAlert(patientId, button) {
@@ -1904,6 +1936,7 @@ function displayAdminUsers(users) {
                     <th>Role</th>
                     <th>Email</th>
                     <th>Department</th>
+                    <th>Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -1914,6 +1947,7 @@ function displayAdminUsers(users) {
                         <td>${u.role}</td>
                         <td>${u.email}</td>
                         <td>${u.department || '-'}</td>
+                        <td>${u.role === 'family' ? `<button class="btn btn-small btn-danger" onclick="deleteFamilyAccount(${Number(u.id)})">Delete family account</button>` : '-'}</td>
                     </tr>
                 `).join('')}
             </tbody>
@@ -1935,6 +1969,7 @@ function displayAdminPatients(patients) {
                     <th>Diagnosis</th>
                     <th>Severity</th>
                     <th>Admitted Date</th>
+                    <th>Status</th>
                     <th>Action</th>
                 </tr>
             </thead>
@@ -1946,6 +1981,7 @@ function displayAdminPatients(patients) {
                         <td>${p.diagnosis}</td>
                         <td><span class="severity-badge severity-${p.severity.toLowerCase()}">${p.severity}</span></td>
                         <td>${new Date(p.admittedDate).toLocaleDateString()}</td>
+                        <td>${p.status === 'discharged' ? `Discharged ${p.dischargedAt ? new Date(p.dischargedAt).toLocaleDateString() : ''}` : 'Active'}</td>
                         <td>
                             <button class="btn btn-small btn-danger" onclick="deletePatientRecord(${p.id}, '${(p.patientCode || '').replace(/'/g, "\\'")}')">Delete</button>
                         </td>
@@ -1955,6 +1991,27 @@ function displayAdminPatients(patients) {
         </table>
     `;
     container.innerHTML = html;
+}
+
+async function deleteFamilyAccount(userId) {
+    const confirmed = window.confirm('Permanently delete this family account? This cannot be undone.');
+    if (!confirmed) return;
+
+    try {
+        const response = await apiCall(`/users/${userId}`, { method: 'DELETE' });
+        if (!response) return;
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            showNotification(result.error || 'Unable to delete family account.', 'danger');
+            return;
+        }
+
+        showNotification('Family account deleted.', 'success');
+        await loadAdminDashboard();
+    } catch (error) {
+        console.error('Error deleting family account:', error);
+        showNotification('Unable to delete family account right now.', 'danger');
+    }
 }
 
 async function deletePatientRecord(patientId, patientCode) {

@@ -815,10 +815,65 @@ function handle_patient_routes($method, $segments, $body)
     if ($method === 'GET' && count($segments) === 3 && $segments[1] === 'doctor') {
         $doctorId = (int)$segments[2];
         $patients = array_values(array_filter(read_data('patients'), function ($patient) use ($doctorId) {
-            return (int)($patient['assignedDoctor'] ?? 0) === $doctorId;
+            return (int)($patient['assignedDoctor'] ?? 0) === $doctorId
+                && ($patient['status'] ?? 'active') !== 'discharged';
         }));
 
         respond(200, $patients);
+    }
+
+    if ($method === 'POST' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'case-complete') {
+        if (($user['role'] ?? '') !== 'doctor') {
+            respond(403, ['error' => 'Only doctors can complete a patient case']);
+        }
+
+        $patientId = (int)$segments[1];
+        $patient = find_by_id('patients', $patientId);
+        if (!$patient) {
+            respond(404, ['error' => 'Patient not found']);
+        }
+
+        $doctorIds = get_doctor_alias_ids((int)$user['id']);
+        if (!in_array((int)($patient['assignedDoctor'] ?? 0), $doctorIds, true)) {
+            respond(403, ['error' => 'You can only complete a case assigned to you']);
+        }
+        if (($patient['status'] ?? '') === 'discharged') {
+            respond(409, ['error' => 'This patient case is already complete']);
+        }
+
+        $linkedFamilyIds = [];
+        foreach (read_data('users') as $familyUser) {
+            if (($familyUser['role'] ?? '') !== 'family') {
+                continue;
+            }
+            $linkedPatient = find_patient_for_user($familyUser);
+            if ($linkedPatient && (int)($linkedPatient['id'] ?? 0) === $patientId) {
+                $linkedFamilyIds[] = (int)$familyUser['id'];
+            }
+        }
+
+        $db = get_db();
+        $db->begin_transaction();
+        try {
+            $updatedPatient = update_row('patients', $patientId, [
+                'status' => 'discharged',
+                'dischargedAt' => gmdate('c'),
+                'dischargedBy' => (int)$user['id']
+            ]);
+            foreach ($linkedFamilyIds as $familyId) {
+                delete_row('users', $familyId);
+            }
+            $db->commit();
+        } catch (Throwable $error) {
+            $db->rollback();
+            respond(500, ['error' => 'Unable to complete this patient case']);
+        }
+
+        respond(200, [
+            'message' => 'Patient case completed and family accounts removed',
+            'patient' => $updatedPatient,
+            'familyAccountsDeleted' => count($linkedFamilyIds)
+        ]);
     }
 
     if ($method === 'POST' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'family-alert') {
@@ -1313,6 +1368,26 @@ function handle_user_routes($method, $segments, $body)
 
         $updated = update_row('users', $targetId, $body);
         respond(200, ['message' => 'User updated successfully', 'user' => sanitize_user($updated)]);
+    }
+
+    if ($method === 'DELETE' && count($segments) === 2 && is_numeric($segments[1])) {
+        if (($user['role'] ?? '') !== 'admin') {
+            respond(403, ['error' => 'Only admins can delete family accounts']);
+        }
+
+        $targetId = (int)$segments[1];
+        $target = find_by_id('users', $targetId);
+        if (!$target) {
+            respond(404, ['error' => 'User not found']);
+        }
+        if (($target['role'] ?? '') !== 'family') {
+            respond(403, ['error' => 'This action only deletes family accounts']);
+        }
+
+        if (!delete_row('users', $targetId)) {
+            respond(404, ['error' => 'Family account not found']);
+        }
+        respond(200, ['message' => 'Family account deleted']);
     }
 
     respond(404, ['error' => 'Route not found']);
