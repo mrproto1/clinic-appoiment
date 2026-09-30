@@ -1753,12 +1753,13 @@ function displayStaffStats(patients, appointments = []) {
 // ADMIN DASHBOARD
 async function loadAdminDashboard() {
     try {
-        const [patientsRes, usersRes, appointmentsRes, leavesRes, bulletinsRes] = await Promise.all([
+        const [patientsRes, usersRes, appointmentsRes, leavesRes, bulletinsRes, siteStatusRes] = await Promise.all([
             apiCall('/patients'),
             apiCall('/users'),
             apiCall('/appointments'),
             apiCall('/leaves'),
-            apiCall('/bulletins/manage')
+            apiCall('/bulletins/manage'),
+            apiCall('/site-status')
         ]);
 
         if (!patientsRes || !patientsRes.ok || !usersRes || !usersRes.ok) return;
@@ -1768,6 +1769,7 @@ async function loadAdminDashboard() {
         const appointments = appointmentsRes && appointmentsRes.ok ? await appointmentsRes.json() : [];
         const leaves = leavesRes && leavesRes.ok ? await leavesRes.json() : [];
         const bulletins = bulletinsRes && bulletinsRes.ok ? await bulletinsRes.json() : null;
+        const siteStatus = siteStatusRes && siteStatusRes.ok ? await siteStatusRes.json() : null;
 
         displayAdminStats(patients, users, appointments, leaves);
         displayAdminUsers(users);
@@ -1776,6 +1778,7 @@ async function loadAdminDashboard() {
         displayAdminOverviewAppointments(appointments, users);
         displayAdminLeaves(leaves);
         displayAdminBulletins(bulletins);
+        if (siteStatus) displayMourningSettings(siteStatus);
     } catch (error) {
         console.error('Error loading admin dashboard:', error);
     }
@@ -2102,6 +2105,55 @@ function setupAdminBulletinForm() {
     });
 
     document.getElementById('admin-bulletin-cancel').addEventListener('click', resetAdminBulletinForm);
+}
+
+function displayMourningSettings(siteStatus) {
+    const enabled = document.getElementById('admin-mourning-enabled');
+    const memorialName = document.getElementById('admin-mourning-name');
+    const notice = document.getElementById('admin-mourning-notice');
+    if (!enabled || !memorialName || !notice) return;
+    enabled.checked = Boolean(siteStatus.mourningMode);
+    memorialName.value = siteStatus.memorialName || '';
+    notice.value = siteStatus.notice || '';
+}
+
+function setupAdminMourningForm() {
+    const form = document.getElementById('admin-mourning-form');
+    if (!form) return;
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const mourningMode = document.getElementById('admin-mourning-enabled').checked;
+        if (mourningMode && !window.confirm('Enable monochrome mourning mode and publish this memorial notice across the website?')) return;
+
+        const status = document.getElementById('admin-mourning-status');
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        status.textContent = 'Saving site display...';
+        try {
+            const response = await apiCall('/site-status', {
+                method: 'POST',
+                body: JSON.stringify({
+                    mourningMode,
+                    memorialName: document.getElementById('admin-mourning-name').value.trim(),
+                    notice: document.getElementById('admin-mourning-notice').value.trim()
+                })
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok || !result.siteStatus) {
+                status.textContent = result.error || 'Unable to save site display.';
+                return;
+            }
+            window.applySiteMourningMode?.(result.siteStatus);
+            status.textContent = result.message || 'Site display updated.';
+            showNotification(result.message || 'Site display updated.', 'success');
+        } catch (error) {
+            console.error('Error saving mourning mode:', error);
+            status.textContent = 'Unable to save site display right now.';
+        } finally {
+            button.disabled = false;
+        }
+    });
 }
 
 function displayAdminPatients(patients) {
@@ -2764,6 +2816,7 @@ function setupStaffPatientForm() {
 document.addEventListener('DOMContentLoaded', () => {
     setupStaffPatientForm();
     setupAdminBulletinForm();
+    setupAdminMourningForm();
     const doctorLeaveForm = document.getElementById('doctor-leave-form');
     if (doctorLeaveForm) {
         doctorLeaveForm.addEventListener('submit', submitDoctorLeave);

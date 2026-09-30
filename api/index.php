@@ -32,7 +32,7 @@ if (($segments[0] ?? '') === 'chat') {
 
 initialize_data_store();
 
-$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins'];
+$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status'];
 while (!empty($segments) && !in_array($segments[0], $allowedResources, true)) {
     array_shift($segments);
 }
@@ -66,6 +66,9 @@ switch ($resource) {
         break;
     case 'bulletins':
         handle_bulletin_routes($requestMethod, $segments, $body);
+        break;
+    case 'site-status':
+        handle_site_status_routes($requestMethod, $segments, $body);
         break;
     default:
         respond(404, ['error' => 'Route not found']);
@@ -364,7 +367,8 @@ function get_collection_table($name)
         'appointments' => 'collection_appointments',
         'organ_donors' => 'collection_organ_donors',
         'leaves' => 'collection_leaves',
-        'bulletins' => 'collection_bulletins'
+        'bulletins' => 'collection_bulletins',
+        'site_settings' => 'collection_site_settings'
     ];
 
     if (!isset($allowed[$name])) {
@@ -1863,6 +1867,57 @@ function handle_organ_donor_routes($method, $segments, $body)
     respond(404, ['error' => 'Route not found']);
 }
 
+function handle_site_status_routes($method, $segments, $body)
+{
+    if ($method === 'GET' && count($segments) === 1) {
+        $settings = read_data('site_settings');
+        $current = $settings[0] ?? [];
+        respond(200, [
+            'mourningMode' => !empty($current['mourningMode']),
+            'memorialName' => (string)($current['memorialName'] ?? ''),
+            'notice' => (string)($current['notice'] ?? '')
+        ]);
+    }
+
+    $admin = require_auth(['admin']);
+    if ($method !== 'POST' || count($segments) !== 1) {
+        respond(405, ['error' => 'Method not allowed']);
+    }
+
+    $mourningMode = !empty($body['mourningMode']);
+    $memorialName = trim((string)($body['memorialName'] ?? ''));
+    $notice = trim((string)($body['notice'] ?? ''));
+    if (strlen($memorialName) > 160 || strlen($notice) > 500) {
+        respond(400, ['error' => 'Memorial name or notice is too long']);
+    }
+    if ($mourningMode && $memorialName === '' && $notice === '') {
+        respond(400, ['error' => 'Add a memorial name or notice before enabling mourning mode']);
+    }
+
+    $settings = read_data('site_settings');
+    $values = [
+        'mourningMode' => $mourningMode,
+        'memorialName' => $mourningMode ? $memorialName : '',
+        'notice' => $mourningMode ? $notice : '',
+        'updatedBy' => (int)$admin['id'],
+        'updatedAt' => gmdate('c')
+    ];
+    if (!empty($settings)) {
+        $saved = update_row('site_settings', (int)$settings[0]['id'], $values);
+    } else {
+        $saved = add_row('site_settings', $values);
+    }
+
+    respond(200, [
+        'message' => $mourningMode ? 'Mourning mode enabled' : 'Mourning mode disabled',
+        'siteStatus' => [
+            'mourningMode' => !empty($saved['mourningMode']),
+            'memorialName' => (string)($saved['memorialName'] ?? ''),
+            'notice' => (string)($saved['notice'] ?? '')
+        ]
+    ]);
+}
+
 function handle_bulletin_routes($method, $segments, $body)
 {
     if ($method === 'GET' && count($segments) === 1) {
@@ -1983,7 +2038,7 @@ function to_minutes($hhmm)
 
 function initialize_data_store()
 {
-    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins'] as $collection) {
+    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings'] as $collection) {
         ensure_collection_table($collection);
     }
 

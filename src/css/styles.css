@@ -1232,6 +1232,33 @@ nav li {
     font-size: 0.78rem;
 }
 
+.site-mourning-banner {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px 18px;
+    flex-wrap: wrap;
+    padding: 12px 20px;
+    border-bottom: 1px solid #777;
+    background: #171717;
+    color: #fff;
+    text-align: center;
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.site-mourning-banner strong {
+    color: #fff;
+    font-weight: 800;
+}
+
+body.mourning-mode > :not(#site-mourning-banner) {
+    filter: grayscale(1);
+}
+
 .bulletin-main {
     padding-bottom: 48px;
 }

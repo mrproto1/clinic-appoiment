@@ -8,7 +8,7 @@
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
-    <script src="js/runtime-config.js?v=20260726c" defer></script>
+    <script src="js/runtime-config.js?v=mourning-mode-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
     <script src="js/dashboard.js?v=bulletin-admin-20260930" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
@@ -388,6 +388,26 @@
             <div class="header">
                 <h1>Hospital Bulletin</h1>
                 <button class="btn btn-primary" onclick="switchSection('admin-section')">← Back</button>
+            </div>
+            <div class="card">
+                <h3>Mourning display</h3>
+                <p class="muted-text">Manually switch the whole website to monochrome and show a memorial notice. It does not publish automatically.</p>
+                <form id="admin-mourning-form" class="mourning-admin-form">
+                    <label class="bulletin-publish-toggle">
+                        <input id="admin-mourning-enabled" type="checkbox">
+                        <span>Enable mourning mode</span>
+                    </label>
+                    <div class="form-group">
+                        <label for="admin-mourning-name">Memorial name / title</label>
+                        <input id="admin-mourning-name" type="text" maxlength="160" placeholder="In memory of...">
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-mourning-notice">Public notice</label>
+                        <textarea id="admin-mourning-notice" rows="3" maxlength="500" placeholder="A short official message"></textarea>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Save mourning display</button>
+                    <p id="admin-mourning-status" class="form-status" role="status" aria-live="polite"></p>
+                </form>
             </div>
             <div class="card">
                 <h3>Compose bulletin</h3>
