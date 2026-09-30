@@ -74,8 +74,13 @@ async function initOrganDonorTribute() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(result.error || 'Unable to save tribute');
+            const result = await response.json().catch(() => null);
+            if (!response.ok) {
+                throw new Error(result?.error || `Unable to save tribute (HTTP ${response.status}).`);
+            }
+            if (!result || !result.donor) {
+                throw new Error(`Unable to save tribute (unexpected server response, HTTP ${response.status}).`);
+            }
 
             latestDonor = result.donor;
             form.reset();

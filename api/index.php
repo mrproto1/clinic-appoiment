@@ -500,6 +500,7 @@ function add_row($name, $row)
 
     $stmt->bind_param('s', $payloadJson);
     if (!$stmt->execute()) {
+        error_log('MySQL insert failed for collection ' . $name . ': ' . $stmt->error);
         respond(500, ['error' => 'Unable to insert MySQL row']);
     }
 
