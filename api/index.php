@@ -32,7 +32,7 @@ if (($segments[0] ?? '') === 'chat') {
 
 initialize_data_store();
 
-$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves'];
+$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins'];
 while (!empty($segments) && !in_array($segments[0], $allowedResources, true)) {
     array_shift($segments);
 }
@@ -63,6 +63,9 @@ switch ($resource) {
         break;
     case 'leaves':
         handle_leave_routes($requestMethod, $segments, $body);
+        break;
+    case 'bulletins':
+        handle_bulletin_routes($requestMethod, $segments, $body);
         break;
     default:
         respond(404, ['error' => 'Route not found']);
@@ -360,7 +363,8 @@ function get_collection_table($name)
         'messages' => 'collection_messages',
         'appointments' => 'collection_appointments',
         'organ_donors' => 'collection_organ_donors',
-        'leaves' => 'collection_leaves'
+        'leaves' => 'collection_leaves',
+        'bulletins' => 'collection_bulletins'
     ];
 
     if (!isset($allowed[$name])) {
@@ -1859,6 +1863,93 @@ function handle_organ_donor_routes($method, $segments, $body)
     respond(404, ['error' => 'Route not found']);
 }
 
+function handle_bulletin_routes($method, $segments, $body)
+{
+    if ($method === 'GET' && count($segments) === 1) {
+        $bulletins = array_values(array_filter(read_data('bulletins'), function ($item) {
+            return !empty($item['published']);
+        }));
+        usort($bulletins, function ($a, $b) {
+            return strtotime($b['publishedAt'] ?? $b['createdAt'] ?? '') <=> strtotime($a['publishedAt'] ?? $a['createdAt'] ?? '');
+        });
+        respond(200, $bulletins);
+    }
+
+    if ($method === 'GET' && count($segments) === 2 && $segments[1] === 'manage') {
+        require_auth(['admin']);
+        $bulletins = read_data('bulletins');
+        usort($bulletins, function ($a, $b) {
+            return strtotime($b['updatedAt'] ?? $b['createdAt'] ?? '') <=> strtotime($a['updatedAt'] ?? $a['createdAt'] ?? '');
+        });
+        respond(200, $bulletins);
+    }
+
+    $admin = require_auth(['admin']);
+    $allowedCategories = ['General', 'Service Update', 'Event', 'Health Information'];
+
+    if ($method === 'POST' && count($segments) === 1) {
+        $title = trim((string)($body['title'] ?? ''));
+        $content = trim((string)($body['content'] ?? ''));
+        $category = trim((string)($body['category'] ?? 'General'));
+        $published = !empty($body['published']);
+
+        if (strlen($title) < 3 || strlen($title) > 160 || $content === '' || strlen($content) > 5000) {
+            respond(400, ['error' => 'Title must be 3-160 characters and content 1-5,000 characters']);
+        }
+        if (!in_array($category, $allowedCategories, true)) {
+            $category = 'General';
+        }
+
+        $bulletin = add_row('bulletins', [
+            'title' => $title,
+            'content' => $content,
+            'category' => $category,
+            'published' => $published,
+            'publishedAt' => $published ? gmdate('c') : null,
+            'createdBy' => (int)$admin['id']
+        ]);
+        respond(201, ['message' => 'Bulletin created', 'bulletin' => $bulletin]);
+    }
+
+    if ($method === 'PUT' && count($segments) === 2 && is_numeric($segments[1])) {
+        $bulletinId = (int)$segments[1];
+        $existing = find_by_id('bulletins', $bulletinId);
+        if (!$existing) {
+            respond(404, ['error' => 'Bulletin not found']);
+        }
+
+        $title = trim((string)($body['title'] ?? ''));
+        $content = trim((string)($body['content'] ?? ''));
+        $category = trim((string)($body['category'] ?? 'General'));
+        $published = !empty($body['published']);
+        if (strlen($title) < 3 || strlen($title) > 160 || $content === '' || strlen($content) > 5000) {
+            respond(400, ['error' => 'Title must be 3-160 characters and content 1-5,000 characters']);
+        }
+        if (!in_array($category, $allowedCategories, true)) {
+            $category = 'General';
+        }
+
+        $updated = update_row('bulletins', $bulletinId, [
+            'title' => $title,
+            'content' => $content,
+            'category' => $category,
+            'published' => $published,
+            'publishedAt' => $published ? ($existing['publishedAt'] ?? gmdate('c')) : null,
+            'updatedBy' => (int)$admin['id']
+        ]);
+        respond(200, ['message' => 'Bulletin updated', 'bulletin' => $updated]);
+    }
+
+    if ($method === 'DELETE' && count($segments) === 2 && is_numeric($segments[1])) {
+        if (!delete_row('bulletins', (int)$segments[1])) {
+            respond(404, ['error' => 'Bulletin not found']);
+        }
+        respond(200, ['message' => 'Bulletin deleted']);
+    }
+
+    respond(404, ['error' => 'Route not found']);
+}
+
 function is_doctor_schedule_valid($date, $time, $department)
 {
     $timestamp = strtotime($date . ' ' . $time);
@@ -1892,7 +1983,7 @@ function to_minutes($hhmm)
 
 function initialize_data_store()
 {
-    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves'] as $collection) {
+    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins'] as $collection) {
         ensure_collection_table($collection);
     }
 

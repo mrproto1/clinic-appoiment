@@ -10,7 +10,7 @@
     </script>
     <script src="js/runtime-config.js?v=20260726c" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=family-case-complete-20260930" defer></script>
+    <script src="js/dashboard.js?v=bulletin-admin-20260930" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -63,6 +63,9 @@
                 </li>
                 <li id="admin-menu-4" style="display: none;">
                     <a href="#" onclick="switchSection('admin-leaves-section')" class="nav-link">Leave Approval</a>
+                </li>
+                <li id="admin-menu-5" style="display: none;">
+                    <a href="#" onclick="switchSection('admin-bulletins-section')" class="nav-link">Bulletin</a>
                 </li>
                 
                 <!-- PATIENT MENU -->
@@ -381,6 +384,49 @@
             </div>
         </div>
 
+        <div id="admin-bulletins-section" class="content-section">
+            <div class="header">
+                <h1>Hospital Bulletin</h1>
+                <button class="btn btn-primary" onclick="switchSection('admin-section')">← Back</button>
+            </div>
+            <div class="card">
+                <h3>Compose bulletin</h3>
+                <form id="admin-bulletin-form" class="bulletin-admin-form">
+                    <input type="hidden" id="admin-bulletin-id">
+                    <div class="form-group">
+                        <label for="admin-bulletin-title">Title</label>
+                        <input id="admin-bulletin-title" type="text" maxlength="160" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-bulletin-category">Category</label>
+                        <select id="admin-bulletin-category">
+                            <option>General</option>
+                            <option>Service Update</option>
+                            <option>Event</option>
+                            <option>Health Information</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-bulletin-content">Announcement</label>
+                        <textarea id="admin-bulletin-content" rows="6" maxlength="5000" required></textarea>
+                    </div>
+                    <label class="bulletin-publish-toggle">
+                        <input id="admin-bulletin-published" type="checkbox">
+                        <span>Publish immediately</span>
+                    </label>
+                    <div class="bulletin-admin-actions">
+                        <button id="admin-bulletin-save" class="btn btn-primary" type="submit">Save bulletin</button>
+                        <button id="admin-bulletin-cancel" class="btn btn-secondary" type="button" hidden>Cancel edit</button>
+                    </div>
+                    <p id="admin-bulletin-status" class="form-status" role="status" aria-live="polite"></p>
+                </form>
+            </div>
+            <div class="card">
+                <h3>All bulletins</h3>
+                <div id="admin-bulletin-list"></div>
+            </div>
+        </div>
+
         <!-- ADMIN USERS -->
         <div id="admin-users-section" class="content-section">
             <div class="header">
@@ -559,7 +605,7 @@
             const menus = {
                 'doctor': ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4'],
                 'staff': ['staff-menu', 'staff-menu-2'],
-                'admin': ['admin-menu', 'admin-menu-2', 'admin-menu-3'],
+                'admin': ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5'],
                 'patient': ['patient-menu', 'patient-menu-2'],
                 'family': ['patient-menu', 'family-menu']
             };

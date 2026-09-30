@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hospital Bulletin | The Protocol</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../css/styles.css">
+    <script>
+        window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
+    </script>
+    <script src="../js/runtime-config.js?v=20260726c" defer></script>
+    <script src="../js/bulletin.js?v=20260930" defer></script>
+</head>
+<body class="contact-page">
+    <header class="contact-nav">
+        <a class="contact-brand" href="../index.html">
+            <span class="protocol-logo-mark" aria-label="The Protocol logo">&#10084;</span>
+            <span class="protocol-logo-text">
+                <p>Hospital</p>
+                <h1>The Protocol</h1>
+                <span>Cardiology</span>
+            </span>
+        </a>
+        <nav aria-label="Primary navigation">
+            <a href="../index.html">Home</a>
+            <a href="appointments.html">Appointments</a>
+            <a href="doctors.html">Doctors</a>
+            <a href="family-access.html">Family Access</a>
+            <a href="bulletin.html" class="active" aria-current="page">Bulletin</a>
+        </nav>
+    </header>
+
+    <main class="contact-main bulletin-main">
+        <section class="contact-hero">
+            <div>
+                <p class="contact-kicker">The Protocol · Official updates</p>
+                <h1>Hospital<br><em>bulletin.</em></h1>
+                <p>Service updates, events, and health information published by the hospital.</p>
+            </div>
+            <div class="contact-signal" aria-hidden="true">
+                <span class="contact-signal-core"></span>
+                <span class="contact-signal-ring contact-signal-ring-one"></span>
+                <span class="contact-signal-ring contact-signal-ring-two"></span>
+                <span class="contact-signal-ring contact-signal-ring-three"></span>
+            </div>
+        </section>
+
+        <section class="bulletin-feed" aria-labelledby="bulletin-feed-title">
+            <div class="bulletin-feed-heading">
+                <div>
+                    <p class="contact-eyebrow">Latest</p>
+                    <h2 id="bulletin-feed-title">From the hospital</h2>
+                </div>
+                <a href="contact.html">Contact the team</a>
+            </div>
+            <div id="bulletin-feed" class="bulletin-list" aria-live="polite">
+                <p class="bulletin-empty">Loading bulletins...</p>
+            </div>
+        </section>
+    </main>
+
+    <footer class="protocol-footer bulletin-footer">
+        <div class="protocol-footer-bottom">
+            <span>&copy; 2026 The Protocol Cardiology</span>
+            <a href="../index.html">Back to Home</a>
+        </div>
+    </footer>
+</body>
+</html>

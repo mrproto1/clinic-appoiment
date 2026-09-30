@@ -13,6 +13,7 @@ let patientAssignedDoctorId = null;
 let staffPatientCache = [];
 let staffAppointmentCache = [];
 let doctorLeaveCache = [];
+let adminBulletinsCache = [];
 let patientVitalsHistory = [];
 let patientVitalsAlertSignature = '';
 let doctorVitalsHistoryByPatient = {};
@@ -401,7 +402,7 @@ function showDashboardRoleMenu(role) {
     const menuIds = {
         doctor: ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5'],
         staff: ['staff-menu', 'staff-menu-2'],
-        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4'],
+        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5'],
         patient: ['patient-menu', 'patient-menu-2'],
         family: ['family-menu', 'patient-menu', 'patient-menu-2']
     };
@@ -1752,11 +1753,12 @@ function displayStaffStats(patients, appointments = []) {
 // ADMIN DASHBOARD
 async function loadAdminDashboard() {
     try {
-        const [patientsRes, usersRes, appointmentsRes, leavesRes] = await Promise.all([
+        const [patientsRes, usersRes, appointmentsRes, leavesRes, bulletinsRes] = await Promise.all([
             apiCall('/patients'),
             apiCall('/users'),
             apiCall('/appointments'),
-            apiCall('/leaves')
+            apiCall('/leaves'),
+            apiCall('/bulletins/manage')
         ]);
 
         if (!patientsRes || !patientsRes.ok || !usersRes || !usersRes.ok) return;
@@ -1765,6 +1767,7 @@ async function loadAdminDashboard() {
         const users = await usersRes.json();
         const appointments = appointmentsRes && appointmentsRes.ok ? await appointmentsRes.json() : [];
         const leaves = leavesRes && leavesRes.ok ? await leavesRes.json() : [];
+        const bulletins = bulletinsRes && bulletinsRes.ok ? await bulletinsRes.json() : null;
 
         displayAdminStats(patients, users, appointments, leaves);
         displayAdminUsers(users);
@@ -1772,6 +1775,7 @@ async function loadAdminDashboard() {
         displayAdminOverviewPatients(patients);
         displayAdminOverviewAppointments(appointments, users);
         displayAdminLeaves(leaves);
+        displayAdminBulletins(bulletins);
     } catch (error) {
         console.error('Error loading admin dashboard:', error);
     }
@@ -1954,6 +1958,150 @@ function displayAdminUsers(users) {
         </table>
     `;
     container.innerHTML = html;
+}
+
+function displayAdminBulletins(bulletins) {
+    adminBulletinsCache = Array.isArray(bulletins) ? bulletins : [];
+    const container = document.getElementById('admin-bulletin-list');
+    if (!container) return;
+    container.replaceChildren();
+
+    if (!Array.isArray(bulletins)) {
+        const unavailable = document.createElement('p');
+        unavailable.className = 'bulletin-empty is-error';
+        unavailable.textContent = 'Bulletin service is not deployed or could not be reached yet.';
+        container.append(unavailable);
+        return;
+    }
+
+    if (!adminBulletinsCache.length) {
+        const empty = document.createElement('p');
+        empty.className = 'muted-text';
+        empty.textContent = 'No bulletins yet. Create a draft or publish the first announcement.';
+        container.append(empty);
+        return;
+    }
+
+    adminBulletinsCache.forEach((bulletin) => {
+        const article = document.createElement('article');
+        article.className = 'admin-bulletin-item';
+        const heading = document.createElement('div');
+        heading.className = 'admin-bulletin-heading';
+        const title = document.createElement('h4');
+        title.textContent = bulletin.title || 'Untitled bulletin';
+        const state = document.createElement('span');
+        state.className = bulletin.published ? 'bulletin-state is-published' : 'bulletin-state';
+        state.textContent = bulletin.published ? 'Published' : 'Draft';
+        heading.append(title, state);
+
+        const meta = document.createElement('p');
+        meta.className = 'muted-text';
+        meta.textContent = `${bulletin.category || 'General'} · ${bulletin.updatedAt || bulletin.createdAt ? new Date(bulletin.updatedAt || bulletin.createdAt).toLocaleString() : ''}`;
+        const summary = document.createElement('p');
+        summary.className = 'admin-bulletin-content';
+        summary.textContent = bulletin.content || '';
+
+        const actions = document.createElement('div');
+        actions.className = 'bulletin-admin-actions';
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'btn btn-small btn-secondary';
+        edit.textContent = 'Edit';
+        edit.addEventListener('click', () => editAdminBulletin(Number(bulletin.id)));
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'btn btn-small btn-danger';
+        remove.textContent = 'Delete';
+        remove.addEventListener('click', () => deleteAdminBulletin(Number(bulletin.id)));
+        actions.append(edit, remove);
+        article.append(heading, meta, summary, actions);
+        container.append(article);
+    });
+}
+
+function resetAdminBulletinForm() {
+    const form = document.getElementById('admin-bulletin-form');
+    if (!form) return;
+    form.reset();
+    document.getElementById('admin-bulletin-id').value = '';
+    document.getElementById('admin-bulletin-save').textContent = 'Save bulletin';
+    document.getElementById('admin-bulletin-cancel').hidden = true;
+    document.getElementById('admin-bulletin-status').textContent = '';
+}
+
+function editAdminBulletin(bulletinId) {
+    const bulletin = adminBulletinsCache.find((item) => Number(item.id) === bulletinId);
+    if (!bulletin) return;
+    document.getElementById('admin-bulletin-id').value = String(bulletin.id);
+    document.getElementById('admin-bulletin-title').value = bulletin.title || '';
+    document.getElementById('admin-bulletin-category').value = bulletin.category || 'General';
+    document.getElementById('admin-bulletin-content').value = bulletin.content || '';
+    document.getElementById('admin-bulletin-published').checked = Boolean(bulletin.published);
+    document.getElementById('admin-bulletin-save').textContent = 'Update bulletin';
+    document.getElementById('admin-bulletin-cancel').hidden = false;
+    document.getElementById('admin-bulletin-status').textContent = `Editing: ${bulletin.title}`;
+    switchSection('admin-bulletins-section');
+    document.getElementById('admin-bulletin-title').focus();
+}
+
+async function deleteAdminBulletin(bulletinId) {
+    if (!window.confirm('Delete this bulletin permanently?')) return;
+    try {
+        const response = await apiCall(`/bulletins/${bulletinId}`, { method: 'DELETE' });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok || !result.message) {
+            showNotification(result.error || 'Unable to delete bulletin.', 'danger');
+            return;
+        }
+        showNotification('Bulletin deleted.', 'success');
+        await loadAdminDashboard();
+    } catch (error) {
+        console.error('Error deleting bulletin:', error);
+        showNotification('Unable to delete bulletin right now.', 'danger');
+    }
+}
+
+function setupAdminBulletinForm() {
+    const form = document.getElementById('admin-bulletin-form');
+    if (!form) return;
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const bulletinId = document.getElementById('admin-bulletin-id').value;
+        const status = document.getElementById('admin-bulletin-status');
+        const payload = {
+            title: document.getElementById('admin-bulletin-title').value.trim(),
+            category: document.getElementById('admin-bulletin-category').value,
+            content: document.getElementById('admin-bulletin-content').value.trim(),
+            published: document.getElementById('admin-bulletin-published').checked
+        };
+        const saveButton = document.getElementById('admin-bulletin-save');
+        saveButton.disabled = true;
+        status.textContent = 'Saving bulletin...';
+
+        try {
+            const response = await apiCall(bulletinId ? `/bulletins/${bulletinId}` : '/bulletins', {
+                method: bulletinId ? 'PUT' : 'POST',
+                body: JSON.stringify(payload)
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok || !result.bulletin) {
+                status.textContent = result.error || 'Unable to save bulletin.';
+                return;
+            }
+
+            resetAdminBulletinForm();
+            showNotification(payload.published ? 'Bulletin published.' : 'Bulletin draft saved.', 'success');
+            await loadAdminDashboard();
+        } catch (error) {
+            console.error('Error saving bulletin:', error);
+            status.textContent = 'Unable to save bulletin right now.';
+        } finally {
+            saveButton.disabled = false;
+        }
+    });
+
+    document.getElementById('admin-bulletin-cancel').addEventListener('click', resetAdminBulletinForm);
 }
 
 function displayAdminPatients(patients) {
@@ -2615,6 +2763,7 @@ function setupStaffPatientForm() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     setupStaffPatientForm();
+    setupAdminBulletinForm();
     const doctorLeaveForm = document.getElementById('doctor-leave-form');
     if (doctorLeaveForm) {
         doctorLeaveForm.addEventListener('submit', submitDoctorLeave);
