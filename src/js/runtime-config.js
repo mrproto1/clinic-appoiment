@@ -25,7 +25,6 @@ window.APP_RUNTIME_CONFIG = window.APP_RUNTIME_CONFIG || (function buildRuntimeC
 
 window.applySiteMourningMode = function applySiteMourningMode(siteStatus) {
     const active = Boolean(siteStatus && siteStatus.mourningMode);
-    document.body.classList.toggle('mourning-mode', active);
 
     const existingBanner = document.getElementById('site-mourning-banner');
     const existingDialog = document.getElementById('site-mourning-dialog');

@@ -1354,10 +1354,6 @@ nav li {
     .site-mourning-dialog[open] { animation: none; }
 }
 
-body.mourning-mode > :not(#site-mourning-banner):not(.site-mourning-dialog) {
-    filter: grayscale(0.9) contrast(0.98);
-}
-
 @media (max-width: 600px) {
     .site-mourning-banner {
         flex-direction: column;
