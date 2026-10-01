@@ -1246,6 +1246,7 @@ nav li {
     padding: 0;
     overflow: hidden auto;
     border: 0;
+    outline: none;
     border-radius: 0;
     background: #171819;
     color: #f2f0eb;
