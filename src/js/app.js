@@ -10,6 +10,19 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function getLocalApiBase() {
+    const runtimeBase = window.APP_RUNTIME_CONFIG && typeof window.APP_RUNTIME_CONFIG.apiBase === 'string'
+        ? window.APP_RUNTIME_CONFIG.apiBase.trim()
+        : '';
+
+    if (runtimeBase !== '') {
+        return runtimeBase.replace(/\/+$/, '');
+    }
+
+    const override = (window.__APP_API_BASE__ || window.APP_API_BASE_URL || '').toString().trim();
+    if (override) {
+        return override.replace(/\/+$/, '');
+    }
+
     const pathName = window.location.pathname || '/';
     const srcIndex = pathName.indexOf('/src/');
     const projectBase = srcIndex >= 0 ? pathName.substring(0, srcIndex) : '';
