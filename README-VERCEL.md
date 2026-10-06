@@ -30,9 +30,11 @@ Before deploying the frontend, set the runtime API base in the browser:
 
 ```html
 <script>
-  window.__APP_API_BASE__ = 'https://your-backend-url.com/api';
+  window.__APP_API_BASE__ = 'https://your-render-backend-url.onrender.com/api';
 </script>
 ```
+
+The project already includes this override in [src/index.html](src/index.html).
 
 Place it before the app scripts in the HTML file, or set it from the deployed environment.
 

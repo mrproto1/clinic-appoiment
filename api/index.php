@@ -32,7 +32,7 @@ if (($segments[0] ?? '') === 'chat') {
 
 initialize_data_store();
 
-$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status'];
+$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests'];
 while (!empty($segments) && !in_array($segments[0], $allowedResources, true)) {
     array_shift($segments);
 }
@@ -69,6 +69,9 @@ switch ($resource) {
         break;
     case 'site-status':
         handle_site_status_routes($requestMethod, $segments, $body);
+        break;
+    case 'clinical-requests':
+        handle_clinical_request_routes($requestMethod, $segments, $body);
         break;
     default:
         respond(404, ['error' => 'Route not found']);
@@ -368,7 +371,8 @@ function get_collection_table($name)
         'organ_donors' => 'collection_organ_donors',
         'leaves' => 'collection_leaves',
         'bulletins' => 'collection_bulletins',
-        'site_settings' => 'collection_site_settings'
+        'site_settings' => 'collection_site_settings',
+        'clinical_requests' => 'collection_clinical_requests'
     ];
 
     if (!isset($allowed[$name])) {
@@ -718,6 +722,20 @@ function handle_auth_routes($method, $segments, $body)
             $role = 'patient';
         }
 
+        $department = trim((string)($body['department'] ?? ''));
+        if (in_array($role, ['doctor', 'staff', 'admin'], true)) {
+            require_auth(['admin']);
+            if (strlen($password) < 8) {
+                respond(400, ['error' => 'Password must be at least 8 characters']);
+            }
+            if ($role === 'doctor' && $department === '') {
+                respond(400, ['error' => 'Doctor accounts need a department']);
+            }
+        }
+        if (strlen($department) > 100 || strlen($name) > 120 || strlen($username) > 120 || strlen($email) > 160) {
+            respond(400, ['error' => 'One or more fields are too long']);
+        }
+
         $linkedPatientId = null;
         $linkedPatientEmail = null;
         $linkedPatientName = null;
@@ -783,7 +801,7 @@ function handle_auth_routes($method, $segments, $body)
             'role' => $role,
             'email' => $email,
             'phone' => $phone !== '' ? $phone : null,
-            'department' => $body['department'] ?? null,
+            'department' => $department !== '' ? $department : null,
             'linkedPatientId' => $linkedPatientId,
             'linkedPatientEmail' => $linkedPatientEmail,
             'linkedPatientName' => $linkedPatientName,
@@ -1867,6 +1885,313 @@ function handle_organ_donor_routes($method, $segments, $body)
     respond(404, ['error' => 'Route not found']);
 }
 
+function clinical_text($value, $maxLength, $required = false)
+{
+    $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', trim((string)$value));
+    if ($required && $text === '') {
+        return null;
+    }
+    if (strlen($text) > $maxLength) {
+        return null;
+    }
+    return $text;
+}
+
+function clinical_clean_medicine($input)
+{
+    if (!is_array($input)) {
+        return null;
+    }
+
+    $medicine = [
+        'name' => clinical_text($input['name'] ?? '', 120, true),
+        'dose' => clinical_text($input['dose'] ?? '', 60, true),
+        'frequency' => clinical_text($input['frequency'] ?? '', 80, true),
+        'duration' => clinical_text($input['duration'] ?? '', 60),
+        'instructions' => clinical_text($input['instructions'] ?? '', 300)
+    ];
+
+    return in_array(null, $medicine, true) ? null : $medicine;
+}
+
+function clinical_clean_blood_result($input)
+{
+    $collectedDate = trim((string)($input['collectedDate'] ?? ''));
+    if (!valid_iso_date($collectedDate) || $collectedDate > gmdate('Y-m-d', time() + 86400)) {
+        return null;
+    }
+
+    $rows = $input['results'] ?? null;
+    if (!is_array($rows) || count($rows) < 1 || count($rows) > 30) {
+        return null;
+    }
+
+    $results = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            return null;
+        }
+
+        $entry = [
+            'test' => clinical_text($row['test'] ?? '', 80, true),
+            'value' => clinical_text($row['value'] ?? '', 40, true),
+            'unit' => clinical_text($row['unit'] ?? '', 30),
+            'range' => clinical_text($row['range'] ?? '', 40)
+        ];
+        if (in_array(null, $entry, true)) {
+            return null;
+        }
+
+        $flag = strtolower(trim((string)($row['flag'] ?? 'normal')));
+        $entry['flag'] = in_array($flag, ['normal', 'high', 'low', 'critical'], true) ? $flag : 'normal';
+        $results[] = $entry;
+    }
+
+    $note = clinical_text($input['note'] ?? '', 300);
+    if ($note === null) {
+        return null;
+    }
+
+    return ['collectedDate' => $collectedDate, 'results' => $results, 'note' => $note];
+}
+
+function clinical_history_entry($user, $action, $note = '')
+{
+    return [
+        'action' => $action,
+        'by' => (string)($user['name'] ?? ''),
+        'role' => (string)($user['role'] ?? ''),
+        'at' => gmdate('c'),
+        'note' => $note
+    ];
+}
+
+function public_clinical_request($item)
+{
+    $public = [
+        'id' => (int)$item['id'],
+        'type' => (string)($item['type'] ?? ''),
+        'patientName' => (string)($item['patientName'] ?? ''),
+        'doctorName' => (string)($item['doctorName'] ?? ''),
+        'nurseName' => (string)($item['nurseName'] ?? ''),
+        'createdAt' => $item['createdAt'] ?? null,
+        'approvedAt' => $item['approvedAt'] ?? null
+    ];
+
+    if ($public['type'] === 'medicine') {
+        $public['medicine'] = $item['medicine'] ?? null;
+        if (!empty($item['originalMedicine'])) {
+            $public['originalMedicine'] = $item['originalMedicine'];
+            $public['changeReason'] = (string)($item['nurseChange']['note'] ?? '');
+        }
+    } else {
+        $public['collectedDate'] = $item['collectedDate'] ?? null;
+        $public['results'] = $item['results'] ?? [];
+        $public['note'] = (string)($item['note'] ?? '');
+    }
+
+    return $public;
+}
+
+function handle_clinical_request_routes($method, $segments, $body)
+{
+    $user = require_auth(['doctor', 'staff', 'admin', 'family']);
+    $role = (string)$user['role'];
+
+    if ($method === 'GET' && count($segments) === 1) {
+        $items = read_data('clinical_requests');
+
+        if ($role === 'doctor') {
+            $doctorIds = get_doctor_alias_ids((int)$user['id']);
+            $items = array_filter($items, function ($item) use ($doctorIds) {
+                return in_array((int)($item['doctorId'] ?? 0), $doctorIds, true);
+            });
+        } elseif ($role === 'family') {
+            $patient = find_patient_for_user($user);
+            $patientId = $patient ? (int)$patient['id'] : 0;
+            $items = array_filter($items, function ($item) use ($patientId) {
+                return $patientId > 0
+                    && (int)($item['patientId'] ?? 0) === $patientId
+                    && ($item['status'] ?? '') === 'approved';
+            });
+        }
+
+        $items = array_values($items);
+        usort($items, function ($a, $b) {
+            return strtotime($b['createdAt'] ?? '') <=> strtotime($a['createdAt'] ?? '');
+        });
+        if ($role === 'family') {
+            $items = array_map('public_clinical_request', $items);
+        }
+        respond(200, $items);
+    }
+
+    if ($method === 'POST' && count($segments) === 1) {
+        if ($role !== 'doctor') {
+            respond(403, ['error' => 'Only doctors can create medicine requests or blood results']);
+        }
+
+        $type = trim((string)($body['type'] ?? ''));
+        if (!in_array($type, ['medicine', 'blood-result'], true)) {
+            respond(400, ['error' => 'Request type must be medicine or blood-result']);
+        }
+
+        $patient = find_by_id('patients', (int)($body['patientId'] ?? 0));
+        if (!$patient) {
+            respond(404, ['error' => 'Patient not found']);
+        }
+        if (($patient['status'] ?? '') === 'discharged') {
+            respond(409, ['error' => 'This patient case is already complete']);
+        }
+        if (!in_array((int)($patient['assignedDoctor'] ?? 0), get_doctor_alias_ids((int)$user['id']), true)) {
+            respond(403, ['error' => 'You can only create requests for patients assigned to you']);
+        }
+
+        $record = [
+            'type' => $type,
+            'patientId' => (int)$patient['id'],
+            'patientName' => (string)($patient['name'] ?? ''),
+            'patientCode' => (string)($patient['patientCode'] ?? ''),
+            'doctorId' => (int)$user['id'],
+            'doctorName' => (string)($user['name'] ?? ''),
+            'status' => 'awaiting_nurse'
+        ];
+
+        if ($type === 'medicine') {
+            $medicine = clinical_clean_medicine($body['medicine'] ?? null);
+            if (!$medicine) {
+                respond(400, ['error' => 'Medicine name, dose and frequency are required, and fields must stay within their length limits']);
+            }
+            $record['medicine'] = $medicine;
+        } else {
+            $blood = clinical_clean_blood_result($body);
+            if (!$blood) {
+                respond(400, ['error' => 'Blood result needs a valid collection date and 1-30 rows, each with a test name and value']);
+            }
+            $record = array_merge($record, $blood);
+        }
+
+        $record['history'] = [clinical_history_entry($user, 'submitted')];
+        $saved = add_row('clinical_requests', $record);
+        respond(201, ['message' => 'Submitted for nurse review', 'request' => $saved]);
+    }
+
+    if ($method === 'POST' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'nurse-review') {
+        if ($role !== 'staff') {
+            respond(403, ['error' => 'Only nurses can give the second approval']);
+        }
+
+        $requestId = (int)$segments[1];
+        $item = find_by_id('clinical_requests', $requestId);
+        if (!$item) {
+            respond(404, ['error' => 'Request not found']);
+        }
+        if (($item['status'] ?? '') !== 'awaiting_nurse') {
+            respond(409, ['error' => 'This request is not waiting for nurse review']);
+        }
+
+        $decision = trim((string)($body['decision'] ?? ''));
+        $history = $item['history'] ?? [];
+
+        if ($decision === 'approve') {
+            $history[] = clinical_history_entry($user, 'nurse-approved');
+            $updated = update_row('clinical_requests', $requestId, [
+                'status' => 'approved',
+                'nurseId' => (int)$user['id'],
+                'nurseName' => (string)($user['name'] ?? ''),
+                'approvedAt' => gmdate('c'),
+                'history' => $history
+            ]);
+            respond(200, ['message' => 'Approved and released to the family account', 'request' => $updated]);
+        }
+
+        if ($decision === 'change') {
+            $note = clinical_text($body['note'] ?? '', 300, true);
+            if ($note === null || strlen($note) < 3) {
+                respond(400, ['error' => 'Explain the change in 3-300 characters']);
+            }
+
+            $change = [
+                'note' => $note,
+                'by' => (string)($user['name'] ?? ''),
+                'nurseId' => (int)$user['id'],
+                'at' => gmdate('c')
+            ];
+            if (($item['type'] ?? '') === 'medicine') {
+                $substitute = clinical_clean_medicine($body['substitute'] ?? null);
+                if (!$substitute) {
+                    respond(400, ['error' => 'A replacement medicine with dose and frequency is required']);
+                }
+                $change['substitute'] = $substitute;
+            }
+
+            $history[] = clinical_history_entry($user, 'nurse-requested-change', $note);
+            $updated = update_row('clinical_requests', $requestId, [
+                'status' => 'awaiting_doctor',
+                'nurseChange' => $change,
+                'history' => $history
+            ]);
+            respond(200, ['message' => 'Sent to the doctor for approval', 'request' => $updated]);
+        }
+
+        respond(400, ['error' => 'Decision must be approve or change']);
+    }
+
+    if ($method === 'POST' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'doctor-decision') {
+        if ($role !== 'doctor') {
+            respond(403, ['error' => 'Only the requesting doctor can decide on a change']);
+        }
+
+        $requestId = (int)$segments[1];
+        $item = find_by_id('clinical_requests', $requestId);
+        if (!$item) {
+            respond(404, ['error' => 'Request not found']);
+        }
+        if (!in_array((int)($item['doctorId'] ?? 0), get_doctor_alias_ids((int)$user['id']), true)) {
+            respond(403, ['error' => 'This request belongs to another doctor']);
+        }
+        if (($item['status'] ?? '') !== 'awaiting_doctor') {
+            respond(409, ['error' => 'This request is not waiting for your approval']);
+        }
+
+        $decision = trim((string)($body['decision'] ?? ''));
+        $history = $item['history'] ?? [];
+
+        if ($decision === 'approve') {
+            $updates = [
+                'status' => 'approved',
+                'approvedAt' => gmdate('c')
+            ];
+            if (!empty($item['nurseChange']['substitute'])) {
+                $updates['originalMedicine'] = $item['medicine'] ?? null;
+                $updates['medicine'] = $item['nurseChange']['substitute'];
+            }
+            if (empty($item['nurseName'])) {
+                $updates['nurseId'] = (int)($item['nurseChange']['nurseId'] ?? 0);
+                $updates['nurseName'] = (string)($item['nurseChange']['by'] ?? '');
+            }
+            $history[] = clinical_history_entry($user, 'doctor-approved-change');
+            $updates['history'] = $history;
+            $updated = update_row('clinical_requests', $requestId, $updates);
+            respond(200, ['message' => 'Change approved and released to the family account', 'request' => $updated]);
+        }
+
+        if ($decision === 'reject') {
+            $history[] = clinical_history_entry($user, 'doctor-rejected-change');
+            $updated = update_row('clinical_requests', $requestId, [
+                'status' => 'rejected',
+                'rejectedAt' => gmdate('c'),
+                'history' => $history
+            ]);
+            respond(200, ['message' => 'Request rejected', 'request' => $updated]);
+        }
+
+        respond(400, ['error' => 'Decision must be approve or reject']);
+    }
+
+    respond(404, ['error' => 'Route not found']);
+}
+
 function handle_site_status_routes($method, $segments, $body)
 {
     if ($method === 'GET' && count($segments) === 1) {
@@ -2040,7 +2365,7 @@ function to_minutes($hhmm)
 
 function initialize_data_store()
 {
-    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings'] as $collection) {
+    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests'] as $collection) {
         ensure_collection_table($collection);
     }
 
@@ -2112,90 +2437,6 @@ function initialize_data_store()
 
     sync_doctor_profiles();
     sync_staff_profiles();
-
-    if (collection_count('patients') === 0) {
-        $patients = [
-            [
-                'id' => 1,
-                'name' => 'Ahmad',
-                'patientCode' => 'AHM-001',
-                'age' => 45,
-                'gender' => 'Male',
-                'bloodType' => 'O+',
-                'phone' => '+60123456789',
-                'email' => 'ahmad@email.com',
-                'address' => '123 Jln Ampang, Kuala Lumpur',
-                'diagnosis' => 'Chest pain',
-                'severity' => 'Moderate',
-                'admittedDate' => '2026-07-10',
-                'admittedBy' => 1,
-                'assignedDoctor' => 2,
-                'assignedStaff' => 4,
-                'vitals' => [
-                    'temperature' => 37.5,
-                    'bloodPressure' => '140/90',
-                    'heartRate' => 85,
-                    'respiratoryRate' => 18,
-                    'lastUpdated' => gmdate('c')
-                ],
-                'notes' => 'Patient complained of severe chest pain',
-                'createdAt' => gmdate('c')
-            ],
-            [
-                'id' => 2,
-                'name' => 'Fatimah',
-                'patientCode' => 'FAT-002',
-                'age' => 32,
-                'gender' => 'Female',
-                'bloodType' => 'B+',
-                'phone' => '+60187654321',
-                'email' => 'fatimah@email.com',
-                'address' => '456 Jln Sultan, Kuala Lumpur',
-                'diagnosis' => 'Post-operation check',
-                'severity' => 'Mild',
-                'admittedDate' => '2026-07-12',
-                'admittedBy' => 2,
-                'assignedDoctor' => 2,
-                'assignedStaff' => 3,
-                'vitals' => [
-                    'temperature' => 37.2,
-                    'bloodPressure' => '118/76',
-                    'heartRate' => 72,
-                    'respiratoryRate' => 16,
-                    'lastUpdated' => gmdate('c')
-                ],
-                'notes' => 'Recovering well from surgery',
-                'createdAt' => gmdate('c')
-            ],
-            [
-                'id' => 3,
-                'name' => 'Rajesh',
-                'patientCode' => 'RAJ-003',
-                'age' => 58,
-                'gender' => 'Male',
-                'bloodType' => 'A+',
-                'phone' => '+60198765432',
-                'email' => 'rajesh@email.com',
-                'address' => '789 Jln Dato, Kuala Lumpur',
-                'diagnosis' => 'Hypertension',
-                'severity' => 'Severe',
-                'admittedDate' => '2026-07-08',
-                'admittedBy' => 1,
-                'assignedDoctor' => 1,
-                'assignedStaff' => 3,
-                'vitals' => [
-                    'temperature' => 36.8,
-                    'bloodPressure' => '160/100',
-                    'heartRate' => 92,
-                    'respiratoryRate' => 20,
-                    'lastUpdated' => gmdate('c')
-                ],
-                'notes' => 'Severe hypertension, monitoring closely',
-                'createdAt' => gmdate('c')
-            ]
-        ];
-        write_data('patients', $patients);
-    }
 
     if (collection_count('messages') === 0) {
         write_data('messages', []);

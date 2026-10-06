@@ -21,7 +21,21 @@ let doctorEcgStateByPatient = {};
 const familyDemoVitalsByPatient = new Map();
 let familyHospitalAlertSignature = '';
 const MAX_RECONNECT_ATTEMPTS = 5;
-const CODE_BLUE_POLL_MS = 1000;
+const CODE_BLUE_POLL_MS = 5000;
+const RATE_LIMIT_BACKOFF_MS = 60000;
+let pollPausedUntil = 0;
+let codeBluePollInFlight = false;
+let realtimePollInFlight = false;
+
+function canPollNow() {
+    return !document.hidden && Date.now() >= pollPausedUntil;
+}
+
+function noteRateLimit(response) {
+    if (response && response.status === 429) {
+        pollPausedUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
+    }
+}
 const MAX_PATIENT_HISTORY_POINTS = 18;
 
 function resolveApiBase() {
@@ -72,39 +86,41 @@ function initWebSocket() {
     // Dedicated fast Code Blue polling for near-instant popup across all dashboards.
     pollCodeBlueAlerts();
     codeBluePollTimer = setInterval(async () => {
-        await pollCodeBlueAlerts();
+        if (!canPollNow() || codeBluePollInFlight) return;
+        codeBluePollInFlight = true;
+        try {
+            await pollCodeBlueAlerts();
+        } finally {
+            codeBluePollInFlight = false;
+        }
     }, CODE_BLUE_POLL_MS);
 
     // XAMPP mode fallback: poll APIs for fresh data instead of WebSocket.
     realtimePollTimer = setInterval(async () => {
-        await pollCodeBlueAlerts();
-
-        const role = currentUser.role;
-
-        if (role === 'doctor') {
-            await loadDoctorDashboard();
-            return;
+        if (!canPollNow() || realtimePollInFlight) return;
+        realtimePollInFlight = true;
+        try {
+            await refreshRoleDashboard();
+        } finally {
+            realtimePollInFlight = false;
         }
+    }, 20000);
+}
 
-        if (role === 'staff') {
-            await loadStaffDashboard();
-            return;
-        }
+async function refreshRoleDashboard() {
+    const role = currentUser.role;
 
-        if (role === 'admin') {
-            await loadAdminDashboard();
-            return;
-        }
-
-        if (role === 'patient') {
-            await loadPatientDashboard();
-            return;
-        }
-
-        if (role === 'family') {
-            await loadFamilyDashboard();
-        }
-    }, 7000);
+    if (role === 'doctor') {
+        await loadDoctorDashboard();
+    } else if (role === 'staff') {
+        await loadStaffDashboard();
+    } else if (role === 'admin') {
+        await loadAdminDashboard();
+    } else if (role === 'patient') {
+        await loadPatientDashboard();
+    } else if (role === 'family') {
+        await loadFamilyDashboard();
+    }
 }
 
 function getCodeBlueSeenKey() {
@@ -153,6 +169,7 @@ async function pollCodeBlueAlerts() {
 
     try {
         const response = await apiCall('/messages/group/all');
+        noteRateLimit(response);
         if (!response || !response.ok) return;
 
         const messages = await response.json();
@@ -400,9 +417,9 @@ async function initializeDashboard() {
 
 function showDashboardRoleMenu(role) {
     const menuIds = {
-        doctor: ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5'],
-        staff: ['staff-menu', 'staff-menu-2'],
-        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5'],
+        doctor: ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5', 'doctor-menu-6'],
+        staff: ['staff-menu', 'staff-menu-2', 'staff-menu-3'],
+        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6'],
         patient: ['patient-menu', 'patient-menu-2'],
         family: ['family-menu', 'patient-menu', 'patient-menu-2']
     };
@@ -560,6 +577,7 @@ async function loadDoctorDashboard() {
         displayDoctorLeaves(leaves);
         renderDoctorOperationSchedule(doctorProfile);
         startLivePatientTelemetry(assignedPatients);
+        loadDoctorClinicalRequests(assignedPatients);
     } catch (error) {
         console.error('Error loading doctor dashboard:', error);
     }
@@ -883,7 +901,9 @@ function startDoctorRealtimeFeed() {
     }
 
     refreshDoctorRealtimePatients();
-    doctorRealtimeTimer = setInterval(refreshDoctorRealtimePatients, 3000);
+    doctorRealtimeTimer = setInterval(() => {
+        if (canPollNow()) refreshDoctorRealtimePatients();
+    }, 8000);
 }
 
 function displayDoctorPatients(patients) {
@@ -1592,6 +1612,7 @@ async function loadStaffDashboard() {
         displayStaffStats(staffPatientCache, staffAppointmentCache);
         displayStaffMessages(messages);
         displayStaffAppointments(staffAppointmentCache);
+        loadStaffClinicalRequests();
 
         if ((!patientsRes || !patientsRes.ok) && appointmentsRes && appointmentsRes.ok) {
             showNotification('Patients API unavailable, showing appointments only.', 'warning');
@@ -1772,7 +1793,9 @@ async function loadAdminDashboard() {
         const siteStatus = siteStatusRes && siteStatusRes.ok ? await siteStatusRes.json() : null;
 
         displayAdminStats(patients, users, appointments, leaves);
+        displayAdminPriorityWatchlist(patients);
         displayAdminUsers(users);
+        displayAdminDoctors(users);
         displayAdminPatients(patients);
         displayAdminOverviewPatients(patients);
         displayAdminOverviewAppointments(appointments, users);
@@ -1814,6 +1837,53 @@ function displayAdminStats(patients, users, appointments = [], leaves = []) {
 
     const statsContainer = document.getElementById('admin-stats');
     if (statsContainer) statsContainer.innerHTML = statsHTML;
+}
+
+function displayAdminPriorityWatchlist(patients) {
+    const container = document.getElementById('admin-priority-watchlist');
+    const count = document.getElementById('admin-priority-count');
+    if (!container || !count) return;
+
+    const priorityPatients = patients
+        .filter((patient) => ['critical', 'severe'].includes(String(patient.severity || '').toLowerCase()))
+        .sort((a, b) => {
+            const severityOrder = { critical: 0, severe: 1 };
+            const severityDifference = severityOrder[String(a.severity).toLowerCase()] - severityOrder[String(b.severity).toLowerCase()];
+            return severityDifference || String(a.name || '').localeCompare(String(b.name || ''));
+        });
+
+    count.textContent = String(priorityPatients.length);
+    if (!priorityPatients.length) {
+        container.innerHTML = '<p class="priority-watch-empty">No severe or critical patients are currently listed.</p>';
+        return;
+    }
+
+    const list = document.createElement('div');
+    list.className = 'priority-watchlist';
+    priorityPatients.slice(0, 5).forEach((patient) => {
+        const item = document.createElement('div');
+        const severity = String(patient.severity || 'Severe');
+        item.className = `priority-watch-item${severity.toLowerCase() === 'critical' ? ' is-critical' : ''}`;
+
+        const mark = document.createElement('span');
+        mark.className = 'priority-watch-mark';
+        mark.setAttribute('aria-hidden', 'true');
+
+        const copy = document.createElement('div');
+        copy.className = 'priority-watch-copy';
+        const name = document.createElement('strong');
+        name.textContent = patient.name || 'Unnamed patient';
+        const detail = document.createElement('span');
+        detail.textContent = [patient.patientCode, patient.sicknessCategory || patient.department].filter(Boolean).join(' · ') || 'Patient record';
+        copy.append(name, detail);
+
+        const severityLabel = document.createElement('span');
+        severityLabel.className = 'priority-watch-severity';
+        severityLabel.textContent = severity;
+        item.append(mark, copy, severityLabel);
+        list.appendChild(item);
+    });
+    container.replaceChildren(list);
 }
 
 function displayAdminLeaves(leaves) {
@@ -1948,7 +2018,7 @@ function displayAdminUsers(users) {
             </thead>
             <tbody>
                 ${users.map(u => `
-                    <tr>
+                    <tr data-user-id="${Number(u.id)}" tabindex="-1">
                         <td>${u.name}</td>
                         <td>${u.username}</td>
                         <td>${u.role}</td>
@@ -1961,6 +2031,83 @@ function displayAdminUsers(users) {
         </table>
     `;
     container.innerHTML = html;
+}
+
+function displayAdminDoctors(users) {
+    const container = document.getElementById('admin-doctors');
+    if (!container) return;
+
+    const doctors = users
+        .filter((user) => user.role === 'doctor')
+        .sort((a, b) => String(a.department || '').localeCompare(String(b.department || '')) || String(a.name || '').localeCompare(String(b.name || '')) || Number(a.id) - Number(b.id));
+
+    container.replaceChildren();
+    if (!doctors.length) {
+        const empty = document.createElement('p');
+        empty.className = 'priority-watch-empty';
+        empty.textContent = 'No doctor profiles are registered yet.';
+        container.appendChild(empty);
+        return;
+    }
+
+    doctors.forEach((doctor) => {
+        const card = document.createElement('article');
+        card.className = 'admin-doctor-card';
+        card.dataset.userId = String(Number(doctor.id) || '');
+
+        const identity = document.createElement('div');
+        identity.className = 'admin-doctor-identity';
+        const avatar = document.createElement('span');
+        avatar.className = 'admin-doctor-avatar';
+        avatar.setAttribute('aria-hidden', 'true');
+        avatar.textContent = String(doctor.name || 'Doctor')
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .map((part) => part.charAt(0).toUpperCase())
+            .join('') || 'DR';
+
+        const name = document.createElement('h2');
+        name.className = 'admin-doctor-name';
+        name.textContent = doctor.name || 'Doctor';
+        identity.append(avatar, name);
+
+        const department = document.createElement('p');
+        department.className = 'admin-doctor-department';
+        department.textContent = doctor.department || 'Department not listed';
+
+        const email = document.createElement('p');
+        email.className = 'admin-doctor-email';
+        email.textContent = doctor.email || 'Email not listed';
+
+        const account = document.createElement('p');
+        account.className = 'admin-doctor-account';
+        account.textContent = `@${doctor.username || 'username unavailable'} · Account #${Number(doctor.id) || 'unknown'}`;
+
+        const openAccount = document.createElement('button');
+        openAccount.type = 'button';
+        openAccount.className = 'admin-doctor-open';
+        openAccount.textContent = 'Open account';
+        openAccount.addEventListener('click', () => openDoctorUserAccount(doctor.id));
+
+        card.append(identity, department, email, account, openAccount);
+        container.appendChild(card);
+    });
+}
+
+function openDoctorUserAccount(userId) {
+    const accountId = Number(userId);
+    if (!Number.isInteger(accountId) || accountId <= 0 || typeof switchSection !== 'function') return;
+
+    switchSection('admin-users-section');
+    requestAnimationFrame(() => {
+        const row = document.querySelector(`#admin-users tr[data-user-id="${accountId}"]`);
+        if (!row) return;
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.focus({ preventScroll: true });
+        row.classList.add('is-account-match');
+        window.setTimeout(() => row.classList.remove('is-account-match'), 1800);
+    });
 }
 
 function displayAdminBulletins(bulletins) {
@@ -2115,6 +2262,495 @@ function displayMourningSettings(siteStatus) {
     enabled.checked = Boolean(siteStatus.mourningMode);
     memorialName.value = siteStatus.memorialName || '';
     notice.value = siteStatus.notice || '';
+}
+
+// MEDICINE REQUESTS AND BLOOD RESULTS
+const CLINICAL_STATUS_LABELS = {
+    awaiting_nurse: 'Waiting for nurse',
+    awaiting_doctor: 'Waiting for doctor',
+    approved: 'Approved',
+    rejected: 'Rejected'
+};
+const BLOOD_STANDARD_PANEL = [
+    { test: 'Haemoglobin', unit: 'g/dL' },
+    { test: 'White cell count', unit: '×10⁹/L' },
+    { test: 'Platelets', unit: '×10⁹/L' },
+    { test: 'Glucose', unit: 'mmol/L' },
+    { test: 'Creatinine', unit: 'µmol/L' }
+];
+let clinicalAwaitingDoctorCount = 0;
+
+function clinicalEl(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+}
+
+function clinicalInput(type, label, maxLength, value) {
+    const input = document.createElement('input');
+    input.type = type;
+    input.placeholder = label;
+    input.maxLength = maxLength;
+    input.setAttribute('aria-label', label);
+    if (value) input.value = value;
+    return input;
+}
+
+function formatClinicalMedicine(medicine) {
+    if (!medicine) return '';
+    return [medicine.name, medicine.dose, medicine.frequency, medicine.duration].filter(Boolean).join(' · ');
+}
+
+function formatClinicalDate(value) {
+    const date = value ? new Date(value) : null;
+    return date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : '';
+}
+
+function setClinicalBadge(id, count) {
+    const badge = document.getElementById(id);
+    if (!badge) return;
+    badge.textContent = String(count);
+    badge.hidden = count === 0;
+}
+
+function buildClinicalDetails(item) {
+    const wrap = clinicalEl('div', 'clinical-details');
+
+    if (item.type === 'medicine') {
+        wrap.append(clinicalEl('p', 'clinical-medicine-line', formatClinicalMedicine(item.medicine)));
+        if (item.medicine?.instructions) wrap.append(clinicalEl('p', 'muted-text', item.medicine.instructions));
+        if (item.originalMedicine) {
+            const reason = item.changeReason || item.nurseChange?.note;
+            wrap.append(clinicalEl('p', 'clinical-change-note', `Replaced ${formatClinicalMedicine(item.originalMedicine)}${reason ? `: ${reason}` : ''}`));
+        }
+        return wrap;
+    }
+
+    const table = clinicalEl('table', 'clinical-result-table');
+    const thead = clinicalEl('thead');
+    const headRow = clinicalEl('tr');
+    ['Test', 'Result', 'Reference', 'Flag'].forEach((label) => headRow.append(clinicalEl('th', '', label)));
+    thead.append(headRow);
+    table.append(thead);
+
+    const body = clinicalEl('tbody');
+    (item.results || []).forEach((row) => {
+        const tr = clinicalEl('tr');
+        tr.append(
+            clinicalEl('td', '', row.test),
+            clinicalEl('td', '', [row.value, row.unit].filter(Boolean).join(' ')),
+            clinicalEl('td', '', row.range || '-')
+        );
+        const flagCell = clinicalEl('td');
+        flagCell.append(clinicalEl('span', `clinical-flag is-${row.flag || 'normal'}`, row.flag || 'normal'));
+        tr.append(flagCell);
+        body.append(tr);
+    });
+    table.append(body);
+    wrap.append(table);
+    if (item.note) wrap.append(clinicalEl('p', 'muted-text', item.note));
+    return wrap;
+}
+
+function buildClinicalCard(item, options = {}) {
+    const card = clinicalEl('article', 'clinical-card');
+    const head = clinicalEl('div', 'clinical-card-head');
+    const titleWrap = clinicalEl('div');
+    titleWrap.append(clinicalEl('h4', '', item.type === 'medicine' ? 'Medicine request' : 'Blood result'));
+
+    const metaParts = [];
+    if (options.showPatient) metaParts.push(item.patientName || 'Patient');
+    if (item.type === 'blood-result' && item.collectedDate) metaParts.push(`Collected ${item.collectedDate}`);
+    if (options.showDoctor) metaParts.push(item.doctorName || 'Doctor');
+    titleWrap.append(clinicalEl('p', 'muted-text', metaParts.join(' · ')));
+    head.append(titleWrap);
+
+    if (item.status) {
+        head.append(clinicalEl('span', `clinical-status is-${item.status}`, CLINICAL_STATUS_LABELS[item.status] || item.status));
+    }
+    card.append(head, buildClinicalDetails(item));
+
+    if (item.status === 'awaiting_doctor' && item.nurseChange) {
+        const change = clinicalEl('div', 'clinical-change-note');
+        change.append(clinicalEl('strong', '', `${item.nurseChange.by || 'Nurse'} proposed a change`));
+        change.append(clinicalEl('p', '', item.nurseChange.note || ''));
+        if (item.nurseChange.substitute) {
+            change.append(clinicalEl('p', '', `Replacement: ${formatClinicalMedicine(item.nurseChange.substitute)}`));
+        }
+        card.append(change);
+    }
+
+    if (options.family) {
+        const approvers = [item.doctorName, item.nurseName].filter(Boolean).join(' and ');
+        const approvedAt = formatClinicalDate(item.approvedAt);
+        card.append(clinicalEl('p', 'muted-text', `Approved by ${approvers || 'the care team'}${approvedAt ? ` on ${approvedAt}` : ''}`));
+    }
+
+    if (options.actions) card.append(options.actions);
+    return card;
+}
+
+function populateClinicalPatientSelects(patients) {
+    document.querySelectorAll('.clinical-patient-select').forEach((select) => {
+        const previous = select.value;
+        select.replaceChildren(new Option('-- Select patient --', ''));
+        patients.forEach((patient) => {
+            select.append(new Option(`${patient.patientCode || 'N/A'} - ${patient.name}`, String(patient.id)));
+        });
+        if (previous && patients.some((patient) => String(patient.id) === previous)) select.value = previous;
+    });
+}
+
+async function fetchClinicalRequests() {
+    try {
+        const response = await apiCall('/clinical-requests');
+        if (!response || !response.ok) return null;
+        const items = await response.json();
+        return Array.isArray(items) ? items : null;
+    } catch (error) {
+        console.error('Error loading clinical requests:', error);
+        return null;
+    }
+}
+
+async function loadDoctorClinicalRequests(patients) {
+    if (Array.isArray(patients)) populateClinicalPatientSelects(patients);
+
+    const items = await fetchClinicalRequests();
+    if (!items) return;
+
+    const pending = items.filter((item) => item.status === 'awaiting_doctor');
+    const attention = document.getElementById('doctor-clinical-attention');
+    const attentionList = document.getElementById('doctor-clinical-attention-list');
+    if (attention && attentionList) {
+        attentionList.replaceChildren(...pending.map((item) => buildClinicalCard(item, {
+            showPatient: true,
+            actions: buildDoctorDecisionActions(item)
+        })));
+        attention.hidden = pending.length === 0;
+    }
+    setClinicalBadge('doctor-clinical-badge', pending.length);
+    if (pending.length > clinicalAwaitingDoctorCount) {
+        showNotification('A nurse needs your approval on a medicine or blood result change.', 'warning');
+    }
+    clinicalAwaitingDoctorCount = pending.length;
+
+    const list = document.getElementById('doctor-clinical-list');
+    if (!list) return;
+    if (!items.length) {
+        list.replaceChildren(clinicalEl('p', 'muted-text', 'No medicine requests or blood results yet.'));
+        return;
+    }
+    list.replaceChildren(...items.map((item) => buildClinicalCard(item, { showPatient: true })));
+}
+
+function buildDoctorDecisionActions(item) {
+    const actions = clinicalEl('div', 'clinical-actions');
+    const approve = clinicalEl('button', 'btn btn-small btn-success', 'Approve change');
+    const reject = clinicalEl('button', 'btn btn-small btn-danger', 'Reject');
+    [approve, reject].forEach((button) => { button.type = 'button'; });
+    approve.addEventListener('click', () => decideClinicalRequest(item.id, 'approve', approve));
+    reject.addEventListener('click', () => decideClinicalRequest(item.id, 'reject', reject));
+    actions.append(approve, reject);
+    return actions;
+}
+
+async function decideClinicalRequest(requestId, decision, button) {
+    button.disabled = true;
+    try {
+        const response = await apiCall(`/clinical-requests/${requestId}/doctor-decision`, {
+            method: 'POST',
+            body: JSON.stringify({ decision })
+        });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to save your decision.', 'danger');
+            return;
+        }
+        showNotification(result.message || 'Decision saved.', 'success');
+        await loadDoctorClinicalRequests();
+    } catch (error) {
+        console.error('Error saving clinical decision:', error);
+        showNotification('Unable to save your decision right now.', 'danger');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function loadStaffClinicalRequests(force = false) {
+    const items = await fetchClinicalRequests();
+    if (!items) return;
+
+    const queue = items.filter((item) => item.status === 'awaiting_nurse');
+    setClinicalBadge('staff-clinical-badge', queue.length);
+
+    const queueEl = document.getElementById('staff-clinical-queue');
+    if (queueEl && (force || !queueEl.querySelector('.clinical-change-form:not([hidden])'))) {
+        queueEl.replaceChildren(...(queue.length
+            ? queue.map((item) => buildClinicalCard(item, {
+                showPatient: true,
+                showDoctor: true,
+                actions: buildNurseActions(item)
+            }))
+            : [clinicalEl('p', 'muted-text', 'Nothing is waiting for review.')]));
+    }
+
+    const recentEl = document.getElementById('staff-clinical-recent');
+    if (recentEl) {
+        const recent = items.filter((item) => item.status !== 'awaiting_nurse').slice(0, 15);
+        recentEl.replaceChildren(...(recent.length
+            ? recent.map((item) => buildClinicalCard(item, { showPatient: true, showDoctor: true }))
+            : [clinicalEl('p', 'muted-text', 'No reviewed items yet.')]));
+    }
+}
+
+function buildNurseActions(item) {
+    const wrap = document.createDocumentFragment();
+    const actions = clinicalEl('div', 'clinical-actions');
+    const approve = clinicalEl('button', 'btn btn-small btn-success', 'Approve');
+    const change = clinicalEl('button', 'btn btn-small btn-secondary', item.type === 'medicine' ? 'Out of stock / change' : 'Needs correction');
+    [approve, change].forEach((button) => { button.type = 'button'; });
+
+    const form = buildNurseChangeForm(item);
+    form.hidden = true;
+    approve.addEventListener('click', () => reviewClinicalRequest(item.id, { decision: 'approve' }, approve));
+    change.addEventListener('click', () => { form.hidden = !form.hidden; });
+    actions.append(approve, change);
+    wrap.append(actions, form);
+    return wrap;
+}
+
+function buildNurseChangeForm(item) {
+    const form = clinicalEl('form', 'clinical-change-form');
+    const fields = {};
+    const addField = (key, label, maxLength, required) => {
+        const input = clinicalInput('text', label, maxLength);
+        input.required = required;
+        fields[key] = input;
+        form.append(input);
+    };
+
+    if (item.type === 'medicine') {
+        addField('name', 'Replacement medicine', 120, true);
+        addField('dose', 'Dose', 60, true);
+        addField('frequency', 'Frequency', 80, true);
+        addField('duration', 'Duration', 60, false);
+    }
+    addField('note', item.type === 'medicine' ? 'Reason, e.g. out of stock' : 'What needs correcting', 300, true);
+
+    const submit = clinicalEl('button', 'btn btn-small btn-primary', `Send to ${item.doctorName || 'doctor'} for approval`);
+    submit.type = 'submit';
+    form.append(submit);
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const payload = { decision: 'change', note: fields.note.value.trim() };
+        if (item.type === 'medicine') {
+            payload.substitute = {
+                name: fields.name.value.trim(),
+                dose: fields.dose.value.trim(),
+                frequency: fields.frequency.value.trim(),
+                duration: fields.duration.value.trim()
+            };
+        }
+        reviewClinicalRequest(item.id, payload, submit);
+    });
+    return form;
+}
+
+async function reviewClinicalRequest(requestId, payload, button) {
+    button.disabled = true;
+    try {
+        const response = await apiCall(`/clinical-requests/${requestId}/nurse-review`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to save your review.', 'danger');
+            return;
+        }
+        showNotification(result.message || 'Review saved.', 'success');
+        await loadStaffClinicalRequests(true);
+    } catch (error) {
+        console.error('Error saving nurse review:', error);
+        showNotification('Unable to save your review right now.', 'danger');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function loadFamilyClinicalRecords() {
+    const list = document.getElementById('family-clinical-list');
+    if (!list) return;
+
+    const items = await fetchClinicalRequests();
+    if (!items) return;
+    list.replaceChildren(...(items.length
+        ? items.map((item) => buildClinicalCard(item, { family: true }))
+        : [clinicalEl('p', 'muted-text', 'Nothing has been approved yet.')]));
+}
+
+function addBloodRow(values = {}) {
+    const container = document.getElementById('clinical-blood-rows');
+    if (!container || container.children.length >= 30) return;
+
+    const row = clinicalEl('div', 'clinical-blood-row');
+    const fields = {
+        test: clinicalInput('text', 'Test', 80, values.test),
+        value: clinicalInput('text', 'Result', 40),
+        unit: clinicalInput('text', 'Unit', 30, values.unit),
+        range: clinicalInput('text', 'Reference range', 40)
+    };
+    Object.entries(fields).forEach(([key, input]) => {
+        input.dataset.field = key;
+        row.append(input);
+    });
+
+    const flag = document.createElement('select');
+    flag.dataset.field = 'flag';
+    flag.setAttribute('aria-label', 'Flag');
+    ['normal', 'high', 'low', 'critical'].forEach((name) => flag.append(new Option(name.charAt(0).toUpperCase() + name.slice(1), name)));
+
+    const remove = clinicalEl('button', 'btn btn-small btn-secondary', 'Remove');
+    remove.type = 'button';
+    remove.addEventListener('click', () => row.remove());
+    row.append(flag, remove);
+    container.append(row);
+}
+
+function resetBloodForm() {
+    const container = document.getElementById('clinical-blood-rows');
+    if (container) container.replaceChildren();
+    addBloodRow();
+    const date = new Date();
+    const dateInput = document.getElementById('clinical-blood-date');
+    if (dateInput) {
+        dateInput.value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    }
+}
+
+async function submitClinicalRequest(payload, status, button) {
+    status.textContent = 'Sending...';
+    button.disabled = true;
+    try {
+        const response = await apiCall('/clinical-requests', { method: 'POST', body: JSON.stringify(payload) });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            status.textContent = result.error || 'Unable to send the request.';
+            return false;
+        }
+        status.textContent = result.message || 'Sent for nurse review.';
+        await loadDoctorClinicalRequests();
+        return true;
+    } catch (error) {
+        console.error('Error submitting clinical request:', error);
+        status.textContent = 'Unable to send the request right now.';
+        return false;
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function setupClinicalForms() {
+    const medicineForm = document.getElementById('clinical-medicine-form');
+    const bloodForm = document.getElementById('clinical-blood-form');
+    const value = (id) => document.getElementById(id).value.trim();
+
+    if (medicineForm) {
+        medicineForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const sent = await submitClinicalRequest({
+                type: 'medicine',
+                patientId: Number(value('clinical-medicine-patient')),
+                medicine: {
+                    name: value('clinical-medicine-name'),
+                    dose: value('clinical-medicine-dose'),
+                    frequency: value('clinical-medicine-frequency'),
+                    duration: value('clinical-medicine-duration'),
+                    instructions: value('clinical-medicine-instructions')
+                }
+            }, document.getElementById('clinical-medicine-status'), medicineForm.querySelector('button[type="submit"]'));
+            if (sent) medicineForm.reset();
+        });
+    }
+
+    if (bloodForm) {
+        resetBloodForm();
+        document.getElementById('clinical-add-row').addEventListener('click', () => addBloodRow());
+        document.getElementById('clinical-add-panel').addEventListener('click', () => {
+            BLOOD_STANDARD_PANEL.forEach((entry) => addBloodRow(entry));
+        });
+
+        bloodForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const results = [...document.querySelectorAll('#clinical-blood-rows .clinical-blood-row')]
+                .map((row) => {
+                    const read = (field) => row.querySelector(`[data-field="${field}"]`).value.trim();
+                    return { test: read('test'), value: read('value'), unit: read('unit'), range: read('range'), flag: read('flag') };
+                })
+                .filter((row) => row.value !== '');
+
+            const status = document.getElementById('clinical-blood-status');
+            if (!results.length) {
+                status.textContent = 'Enter at least one result. Rows without a result are skipped.';
+                return;
+            }
+
+            const sent = await submitClinicalRequest({
+                type: 'blood-result',
+                patientId: Number(value('clinical-blood-patient')),
+                collectedDate: value('clinical-blood-date'),
+                results,
+                note: value('clinical-blood-note')
+            }, status, bloodForm.querySelector('button[type="submit"]'));
+            if (sent) {
+                bloodForm.reset();
+                resetBloodForm();
+            }
+        });
+    }
+}
+
+function setupAdminDoctorForm() {
+    const form = document.getElementById('admin-doctor-form');
+    const status = document.getElementById('admin-doctor-status');
+    if (!form || !status) return;
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submit = form.querySelector('button[type="submit"]');
+        const value = (id) => document.getElementById(id).value.trim();
+        const payload = {
+            role: 'doctor',
+            name: value('admin-doctor-name-input'),
+            username: value('admin-doctor-username'),
+            email: value('admin-doctor-email-input'),
+            department: value('admin-doctor-department-input'),
+            password: document.getElementById('admin-doctor-password').value
+        };
+
+        status.textContent = 'Creating account...';
+        submit.disabled = true;
+        try {
+            const response = await apiCall('/auth/register', { method: 'POST', body: JSON.stringify(payload) });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok) {
+                status.textContent = result.error || 'Unable to create doctor account.';
+                return;
+            }
+            form.reset();
+            status.textContent = `Account created for ${result.user?.name || payload.name}.`;
+            showNotification('Doctor account created.', 'success');
+            await loadAdminDashboard();
+        } catch (error) {
+            console.error('Error creating doctor account:', error);
+            status.textContent = 'Unable to create doctor account right now.';
+        } finally {
+            submit.disabled = false;
+        }
+    });
 }
 
 function setupAdminMourningForm() {
@@ -2296,6 +2932,7 @@ async function loadFamilyDashboard() {
         ));
         patientAssignedDoctorId = Number(patient.assignedDoctor) || null;
         renderPatientHealthPanel(patient, 'family-content');
+        loadFamilyClinicalRecords();
     } catch (error) {
         console.error('Error loading family dashboard:', error);
         container.innerHTML = `
@@ -2812,11 +3449,86 @@ function setupStaffPatientForm() {
     });
 }
 
+function setupDashboardTools() {
+    const searchInput = document.getElementById('dashboard-view-search');
+    const sectionLabel = document.getElementById('dashboard-section-name');
+    const dateLabel = document.getElementById('dashboard-date');
+    if (!searchInput) return;
+
+    if (dateLabel) {
+        dateLabel.textContent = new Intl.DateTimeFormat(undefined, {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric'
+        }).format(new Date());
+    }
+
+    let activeSectionId = '';
+    const searchableItems = 'tbody tr, .priority-watch-item, .admin-leave-row, .admin-bulletin-item, .admin-doctor-card, .clinical-card, .stat-card, .patient-card, .appointment-card, .doctor-card';
+
+    const refreshDashboardTools = () => {
+        const activeSection = document.querySelector('.content-section.active');
+        if (!activeSection) return;
+
+        if (sectionLabel) {
+            const heading = activeSection.querySelector('.header h1');
+            sectionLabel.textContent = heading ? heading.textContent.trim() : 'Overview';
+        }
+
+        if (activeSection.id !== activeSectionId) {
+            activeSectionId = activeSection.id;
+            searchInput.value = '';
+        }
+
+        const query = searchInput.value.trim().toLocaleLowerCase();
+        activeSection.querySelectorAll(searchableItems).forEach((item) => {
+            item.hidden = query !== '' && !item.textContent.toLocaleLowerCase().includes(query);
+        });
+    };
+
+    searchInput.addEventListener('input', refreshDashboardTools);
+    document.addEventListener('keydown', (event) => {
+        const target = event.target;
+        const isEditing = target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+        if (event.key === '/' && !isEditing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+            event.preventDefault();
+            searchInput.focus();
+        } else if (event.key === 'Escape' && document.activeElement === searchInput) {
+            searchInput.value = '';
+            searchInput.blur();
+            refreshDashboardTools();
+        }
+    });
+
+    const observer = new MutationObserver(refreshDashboardTools);
+    document.querySelectorAll('.content-section').forEach((section) => {
+        observer.observe(section, { attributes: true, attributeFilter: ['class'], childList: true, subtree: true });
+    });
+    refreshDashboardTools();
+}
+
+function openRoleAlerts() {
+    if (!currentUser || typeof switchSection !== 'function') return;
+
+    const roleTarget = {
+        admin: 'admin-section',
+        doctor: 'doctor-messages-section',
+        staff: 'staff-patients-section',
+        patient: 'patient-messages-section',
+        family: 'family-section'
+    };
+    const target = roleTarget[currentUser.role];
+    if (target) switchSection(target);
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
+    setupDashboardTools();
     setupStaffPatientForm();
     setupAdminBulletinForm();
     setupAdminMourningForm();
+    setupAdminDoctorForm();
+    setupClinicalForms();
     const doctorLeaveForm = document.getElementById('doctor-leave-form');
     if (doctorLeaveForm) {
         doctorLeaveForm.addEventListener('submit', submitDoctorLeave);

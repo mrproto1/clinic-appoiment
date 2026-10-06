@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=fullscreen-root-fix-20261001">
+    <link rel="stylesheet" href="css/styles.css?v=clinical-20261006">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=bulletin-admin-20260930" defer></script>
+    <script src="js/dashboard.js?v=clinical-20261006" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -42,6 +42,9 @@
                 <li id="doctor-menu-5" style="display: none;">
                     <a href="#" onclick="switchSection('doctor-leave-section')" class="nav-link">Leave Request</a>
                 </li>
+                <li id="doctor-menu-6" style="display: none;">
+                    <a href="#" onclick="switchSection('doctor-clinical-section')" class="nav-link">Medicine &amp; Results <span id="doctor-clinical-badge" class="nav-badge" hidden>0</span></a>
+                </li>
                 
                 <!-- STAFF MENU -->
                 <li id="staff-menu" style="display: none;">
@@ -49,6 +52,9 @@
                 </li>
                 <li id="staff-menu-2" style="display: none;">
                     <a href="#" onclick="switchSection('staff-patients-section')" class="nav-link">Patient List</a>
+                </li>
+                <li id="staff-menu-3" style="display: none;">
+                    <a href="#" onclick="switchSection('staff-clinical-section')" class="nav-link">Clinical Review <span id="staff-clinical-badge" class="nav-badge" hidden>0</span></a>
                 </li>
                 
                 <!-- ADMIN MENU -->
@@ -66,6 +72,9 @@
                 </li>
                 <li id="admin-menu-5" style="display: none;">
                     <a href="#" onclick="switchSection('admin-bulletins-section')" class="nav-link">Bulletin</a>
+                </li>
+                <li id="admin-menu-6" style="display: none;">
+                    <a href="#" onclick="switchSection('admin-doctors-section')" class="nav-link">Doctors</a>
                 </li>
                 
                 <!-- PATIENT MENU -->
@@ -86,6 +95,25 @@
 
     <!-- MAIN CONTENT -->
     <main class="main-content">
+        <div class="dashboard-topbar">
+            <div class="dashboard-location">
+                <span>THE PROTOCOL / HMS</span>
+                <strong id="dashboard-section-name">Overview</strong>
+            </div>
+            <label class="dashboard-search" for="dashboard-view-search">
+                <span aria-hidden="true">⌕</span>
+                <input id="dashboard-view-search" type="search" placeholder="Search this view..." autocomplete="off">
+                <kbd>/</kbd>
+            </label>
+            <div class="dashboard-topbar-actions">
+                <button class="dashboard-alert-button" type="button" onclick="openRoleAlerts()" aria-label="Open priority items" title="Open priority items">
+                    <span aria-hidden="true">♧</span>
+                    <i></i>
+                </button>
+                <div class="dashboard-date" id="dashboard-date"></div>
+            </div>
+        </div>
+
         <!-- NOTIFICATIONS -->
         <div id="notifications-container"></div>
 
@@ -199,6 +227,84 @@
             <div class="card">
                 <h3>My leave requests</h3>
                 <div id="doctor-leave-list"></div>
+            </div>
+        </div>
+
+        <div id="doctor-clinical-section" class="content-section">
+            <div class="header">
+                <h1>Medicine &amp; Blood Results</h1>
+            </div>
+
+            <section id="doctor-clinical-attention" class="card clinical-attention" hidden aria-live="polite">
+                <h3>Needs your approval</h3>
+                <p class="muted-text">A nurse proposed a change. Approve or reject it before anything reaches the family account.</p>
+                <div id="doctor-clinical-attention-list" class="clinical-list"></div>
+            </section>
+
+            <div class="clinical-form-grid">
+                <form id="clinical-medicine-form" class="card clinical-form" autocomplete="off">
+                    <h3>Request medicine</h3>
+                    <p class="muted-text">A nurse gives the second approval. If stock is short, the nurse sends a replacement back to you.</p>
+                    <div class="form-group">
+                        <label for="clinical-medicine-patient">Patient</label>
+                        <select id="clinical-medicine-patient" class="clinical-patient-select" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="clinical-medicine-name">Medicine</label>
+                        <input id="clinical-medicine-name" type="text" maxlength="120" required>
+                    </div>
+                    <div class="clinical-field-row">
+                        <div class="form-group">
+                            <label for="clinical-medicine-dose">Dose</label>
+                            <input id="clinical-medicine-dose" type="text" maxlength="60" placeholder="e.g. 500 mg" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="clinical-medicine-frequency">Frequency</label>
+                            <input id="clinical-medicine-frequency" type="text" maxlength="80" placeholder="e.g. twice daily" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="clinical-medicine-duration">Duration</label>
+                            <input id="clinical-medicine-duration" type="text" maxlength="60" placeholder="e.g. 5 days">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="clinical-medicine-instructions">Instructions</label>
+                        <textarea id="clinical-medicine-instructions" rows="2" maxlength="300"></textarea>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Send for nurse approval</button>
+                    <p id="clinical-medicine-status" class="form-status" role="status" aria-live="polite"></p>
+                </form>
+
+                <form id="clinical-blood-form" class="card clinical-form" autocomplete="off">
+                    <h3>Enter blood result</h3>
+                    <p class="muted-text">Add each test with its value. Reference ranges are optional and entered by you.</p>
+                    <div class="clinical-field-row">
+                        <div class="form-group">
+                            <label for="clinical-blood-patient">Patient</label>
+                            <select id="clinical-blood-patient" class="clinical-patient-select" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="clinical-blood-date">Collected on</label>
+                            <input id="clinical-blood-date" type="date" required>
+                        </div>
+                    </div>
+                    <div id="clinical-blood-rows" class="clinical-blood-rows"></div>
+                    <div class="clinical-form-actions">
+                        <button id="clinical-add-row" class="btn btn-secondary btn-small" type="button">Add test</button>
+                        <button id="clinical-add-panel" class="btn btn-secondary btn-small" type="button">Add standard panel</button>
+                    </div>
+                    <div class="form-group">
+                        <label for="clinical-blood-note">Note</label>
+                        <textarea id="clinical-blood-note" rows="2" maxlength="300"></textarea>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Send for nurse approval</button>
+                    <p id="clinical-blood-status" class="form-status" role="status" aria-live="polite"></p>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>My requests and results</h3>
+                <div id="doctor-clinical-list" class="clinical-list"></div>
             </div>
         </div>
 
@@ -345,6 +451,21 @@
             </div>
         </div>
 
+        <div id="staff-clinical-section" class="content-section">
+            <div class="header">
+                <h1>Clinical Review</h1>
+            </div>
+            <p class="admin-doctor-intro">Give the second approval before a medicine request or blood result appears on the family account.</p>
+            <div class="card">
+                <h3>Waiting for your review</h3>
+                <div id="staff-clinical-queue" class="clinical-list"></div>
+            </div>
+            <div class="card">
+                <h3>Recent</h3>
+                <div id="staff-clinical-recent" class="clinical-list"></div>
+            </div>
+        </div>
+
         <!-- ADMIN DASHBOARD -->
         <div id="admin-section" class="content-section">
             <div class="header">
@@ -352,6 +473,30 @@
             </div>
 
             <div id="admin-stats" class="grid"></div>
+
+            <div class="admin-command-grid">
+                <section class="card admin-priority-card" aria-labelledby="admin-priority-title">
+                    <div class="admin-panel-heading">
+                        <div>
+                            <p class="dashboard-eyebrow">Clinical attention</p>
+                            <h2 id="admin-priority-title">Priority watchlist</h2>
+                        </div>
+                        <span id="admin-priority-count" class="priority-count">0</span>
+                    </div>
+                    <div id="admin-priority-watchlist" aria-live="polite"></div>
+                </section>
+                <section class="card admin-quick-actions" aria-labelledby="admin-quick-actions-title">
+                    <div class="admin-panel-heading">
+                        <div>
+                            <p class="dashboard-eyebrow">Shortcuts</p>
+                            <h2 id="admin-quick-actions-title">Quick actions</h2>
+                        </div>
+                    </div>
+                    <button type="button" onclick="switchSection('admin-patients-section')"><span aria-hidden="true">＋</span> Patient records</button>
+                    <button type="button" onclick="switchSection('admin-leaves-section')"><span aria-hidden="true">◷</span> Review leave requests</button>
+                    <button type="button" onclick="switchSection('admin-bulletins-section')"><span aria-hidden="true">▤</span> Publish a bulletin</button>
+                </section>
+            </div>
 
             <div class="card">
                 <h3>System Overview</h3>
@@ -459,6 +604,50 @@
             </div>
         </div>
 
+        <div id="admin-doctors-section" class="content-section">
+            <div class="header">
+                <h1>Doctor Directory</h1>
+                <button class="btn btn-primary" onclick="switchSection('admin-section')">← Back</button>
+            </div>
+            <p class="admin-doctor-intro">Hospital doctors, organized by their registered department.</p>
+            <form id="admin-doctor-form" class="card admin-doctor-form" autocomplete="off">
+                <h3>Create doctor account</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="admin-doctor-name-input">Full name</label>
+                        <input id="admin-doctor-name-input" type="text" maxlength="120" placeholder="Dr. Full Name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-doctor-username">Username</label>
+                        <input id="admin-doctor-username" type="text" maxlength="120" placeholder="first.last" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-doctor-email-input">Email</label>
+                        <input id="admin-doctor-email-input" type="email" maxlength="160" placeholder="doctor@hospital.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-doctor-department-input">Department</label>
+                        <input id="admin-doctor-department-input" type="text" maxlength="100" list="admin-doctor-departments" placeholder="Cardiology" required>
+                        <datalist id="admin-doctor-departments">
+                            <option value="Cardiology"></option>
+                            <option value="Psychiatry"></option>
+                            <option value="Neuro-Oftalmology"></option>
+                            <option value="Neurosurgery"></option>
+                            <option value="Surgery"></option>
+                            <option value="General Medicine"></option>
+                        </datalist>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-doctor-password">Temporary password</label>
+                        <input id="admin-doctor-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+                    </div>
+                </div>
+                <button class="btn btn-primary" type="submit">Create doctor account</button>
+                <p id="admin-doctor-status" class="form-status" role="status" aria-live="polite"></p>
+            </form>
+            <div id="admin-doctors" class="admin-doctor-grid" aria-live="polite"></div>
+        </div>
+
         <!-- ADMIN PATIENTS -->
         <div id="admin-patients-section" class="content-section">
             <div class="header">
@@ -485,6 +674,11 @@
             </div>
             <div id="family-urgent-alerts" class="family-urgent-alert-list" aria-live="assertive"></div>
             <div id="family-content"></div>
+            <section id="family-clinical" class="card family-clinical" aria-labelledby="family-clinical-title">
+                <h3 id="family-clinical-title">Medicine requests &amp; blood results</h3>
+                <p class="muted-text">Only items approved by the doctor and nurse appear here.</p>
+                <div id="family-clinical-list" class="clinical-list"></div>
+            </section>
         </div>
 
         <!-- PATIENT MESSAGES -->

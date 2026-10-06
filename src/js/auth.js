@@ -258,6 +258,7 @@ if (document.getElementById('familySignupForm')) {
 
         const signupName = document.getElementById('signup-name').value.trim();
         const signupEmail = document.getElementById('signup-email').value.trim();
+        const signupPhone = document.getElementById('family-phone').value.trim();
         const signupPassword = document.getElementById('signup-password').value;
         const patientEmail = document.getElementById('linked-patient-email').value.trim();
         const relationship = document.getElementById('relationship').value.trim();
@@ -272,6 +273,7 @@ if (document.getElementById('familySignupForm')) {
                 username: signupEmail,
                 name: signupName,
                 email: signupEmail,
+                phone: signupPhone,
                 password: signupPassword,
                 role: 'family',
                 patientEmail,
