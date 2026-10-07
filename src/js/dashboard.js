@@ -2452,7 +2452,7 @@ async function loadDoctorClinicalRequests(patients) {
     }
     setClinicalBadge('doctor-clinical-badge', pending.length);
     if (pending.length > clinicalAwaitingDoctorCount) {
-        showNotification('A nurse needs your approval on a medicine or blood result change.', 'warning');
+        showNotification('A family request or nurse-proposed change needs your approval.', 'warning');
     }
     clinicalAwaitingDoctorCount = pending.length;
 
@@ -2680,7 +2680,7 @@ function setupFamilyMedicineRequestForm() {
                 })
             });
             const result = response ? await response.json().catch(() => ({})) : {};
-            if (!response || !response.ok) {
+            if (!response || !response.ok || !result.requestId) {
                 status.textContent = result.error || clinicalApiUnavailableMessage();
                 return;
             }
@@ -2742,8 +2742,8 @@ async function submitClinicalRequest(payload, status, button) {
     try {
         const response = await apiCall('/clinical-requests', { method: 'POST', body: JSON.stringify(payload) });
         const result = response ? await response.json().catch(() => ({})) : {};
-        if (!response || !response.ok) {
-            status.textContent = result.error || 'Unable to send the request.';
+        if (!response || !response.ok || !result.request?.id) {
+            status.textContent = result.error || (response?.ok ? clinicalApiUnavailableMessage() : 'Unable to send the request.');
             return false;
         }
         status.textContent = result.message || 'Sent for nurse review.';
@@ -2796,8 +2796,6 @@ function setupClinicalForms() {
                     return { test: read('test'), value: read('value'), unit: read('unit'), range: read('range'), flag: read('flag') };
                 })
                 .filter((row) => row.value !== '');
-
-            const status = document.getElementById('clinical-blood-status');
             if (!results.length) {
                 status.textContent = 'Enter at least one result. Rows without a result are skipped.';
                 return;
