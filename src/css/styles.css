@@ -5455,3 +5455,47 @@ body.dashboard [hidden] {
         grid-template-columns: 1fr 1fr;
     }
 }
+
+.family-medicine-request-form {
+    margin: 14px 0 18px;
+    padding: 13px;
+    background: #f7faf9;
+    border: 1px solid #e2eae8;
+    border-radius: 5px;
+}
+
+.family-medicine-request-form h4 {
+    margin-bottom: 6px;
+    color: #263a4a;
+    font-size: 0.88rem;
+}
+
+.family-medicine-request-form .clinical-field-row {
+    margin-bottom: 9px;
+}
+
+.family-medicine-request-form .form-group {
+    min-width: 0;
+}
+
+.family-medicine-request-form .form-status {
+    margin-top: 7px;
+}
+
+.clinical-api-unavailable {
+    padding: 11px 12px;
+    color: #744917;
+    background: #fff7e8;
+    border: 1px solid #f2dfb8;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.doctor-medicine-approval-form {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
+
+.doctor-medicine-approval-form .clinical-actions {
+    grid-column: 1 / -1;
+}

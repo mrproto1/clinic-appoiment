@@ -1974,9 +1974,17 @@ function public_clinical_request($item)
         'patientName' => (string)($item['patientName'] ?? ''),
         'doctorName' => (string)($item['doctorName'] ?? ''),
         'nurseName' => (string)($item['nurseName'] ?? ''),
+        'status' => (string)($item['status'] ?? ''),
         'createdAt' => $item['createdAt'] ?? null,
         'approvedAt' => $item['approvedAt'] ?? null
     ];
+
+    if (!empty($item['familyRequest'])) {
+        $public['familyRequest'] = [
+            'medicineName' => (string)($item['familyRequest']['medicineName'] ?? ''),
+            'note' => (string)($item['familyRequest']['note'] ?? '')
+        ];
+    }
 
     if ($public['type'] === 'medicine') {
         $public['medicine'] = $item['medicine'] ?? null;
@@ -1984,6 +1992,11 @@ function public_clinical_request($item)
             $public['originalMedicine'] = $item['originalMedicine'];
             $public['changeReason'] = (string)($item['nurseChange']['note'] ?? '');
         }
+    } elseif ($public['type'] === 'family-medicine-request') {
+        $public['familyRequest'] = [
+            'medicineName' => (string)($item['familyRequest']['medicineName'] ?? ''),
+            'note' => (string)($item['familyRequest']['note'] ?? '')
+        ];
     } else {
         $public['collectedDate'] = $item['collectedDate'] ?? null;
         $public['results'] = $item['results'] ?? [];
@@ -2009,10 +2022,19 @@ function handle_clinical_request_routes($method, $segments, $body)
         } elseif ($role === 'family') {
             $patient = find_patient_for_user($user);
             $patientId = $patient ? (int)$patient['id'] : 0;
-            $items = array_filter($items, function ($item) use ($patientId) {
-                return $patientId > 0
-                    && (int)($item['patientId'] ?? 0) === $patientId
-                    && ($item['status'] ?? '') === 'approved';
+            $familyUserId = (int)$user['id'];
+            $items = array_filter($items, function ($item) use ($patientId, $familyUserId) {
+                if ($patientId <= 0 || (int)($item['patientId'] ?? 0) !== $patientId) {
+                    return false;
+                }
+
+                if (($item['status'] ?? '') === 'approved') {
+                    return true;
+                }
+
+                return ($item['type'] ?? '') === 'family-medicine-request'
+                    && (int)($item['familyRequest']['requesterId'] ?? 0) === $familyUserId
+                    && in_array(($item['status'] ?? ''), ['awaiting_doctor', 'awaiting_nurse', 'rejected'], true);
             });
         }
 
@@ -2027,6 +2049,48 @@ function handle_clinical_request_routes($method, $segments, $body)
     }
 
     if ($method === 'POST' && count($segments) === 1) {
+        if ($role === 'family') {
+            $type = trim((string)($body['type'] ?? ''));
+            $requestedName = clinical_text($body['medicineName'] ?? '', 120, true);
+            $requestNote = clinical_text($body['note'] ?? '', 300);
+            if ($type !== 'family-medicine-request' || $requestedName === null || $requestNote === null) {
+                respond(400, ['error' => 'Provide a medicine name and a note no longer than 300 characters']);
+            }
+
+            $patient = find_patient_for_user($user);
+            if (!$patient) {
+                respond(409, ['error' => 'Your family account is not linked to a patient']);
+            }
+            if (($patient['status'] ?? '') === 'discharged') {
+                respond(409, ['error' => 'This patient case is already complete']);
+            }
+
+            $doctorId = (int)($patient['assignedDoctor'] ?? 0);
+            $doctor = $doctorId > 0 ? find_by_id('users', $doctorId) : null;
+            if (!$doctor || ($doctor['role'] ?? '') !== 'doctor') {
+                respond(409, ['error' => 'No doctor is assigned to this patient yet']);
+            }
+
+            $record = [
+                'type' => 'family-medicine-request',
+                'patientId' => (int)$patient['id'],
+                'patientName' => (string)($patient['name'] ?? ''),
+                'patientCode' => (string)($patient['patientCode'] ?? ''),
+                'doctorId' => $doctorId,
+                'doctorName' => (string)($doctor['name'] ?? ''),
+                'familyRequest' => [
+                    'requesterId' => (int)$user['id'],
+                    'requesterName' => (string)($user['name'] ?? ''),
+                    'medicineName' => $requestedName,
+                    'note' => $requestNote
+                ],
+                'status' => 'awaiting_doctor',
+                'history' => [clinical_history_entry($user, 'family-requested-medicine')]
+            ];
+            $saved = add_row('clinical_requests', $record);
+            respond(201, ['message' => 'Request sent to the patient’s assigned doctor', 'requestId' => (int)$saved['id']]);
+        }
+
         if ($role !== 'doctor') {
             respond(403, ['error' => 'Only doctors can create medicine requests or blood results']);
         }
@@ -2158,6 +2222,22 @@ function handle_clinical_request_routes($method, $segments, $body)
         $history = $item['history'] ?? [];
 
         if ($decision === 'approve') {
+            if (($item['type'] ?? '') === 'family-medicine-request') {
+                $medicine = clinical_clean_medicine($body['medicine'] ?? null);
+                if (!$medicine) {
+                    respond(400, ['error' => 'Enter the medicine, dose and frequency before sending this request to the nurse']);
+                }
+
+                $history[] = clinical_history_entry($user, 'doctor-approved-family-request');
+                $updated = update_row('clinical_requests', $requestId, [
+                    'type' => 'medicine',
+                    'medicine' => $medicine,
+                    'status' => 'awaiting_nurse',
+                    'history' => $history
+                ]);
+                respond(200, ['message' => 'Prescribed request sent to the nurse for second approval', 'request' => $updated]);
+            }
+
             $updates = [
                 'status' => 'approved',
                 'approvedAt' => gmdate('c')

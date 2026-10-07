@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=clinical-20261006">
+    <link rel="stylesheet" href="css/styles.css?v=family-medicine-20261007">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=clinical-20261006" defer></script>
+    <script src="js/dashboard.js?v=family-medicine-20261007" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -677,6 +677,21 @@
             <section id="family-clinical" class="card family-clinical" aria-labelledby="family-clinical-title">
                 <h3 id="family-clinical-title">Medicine requests &amp; blood results</h3>
                 <p class="muted-text">Only items approved by the doctor and nurse appear here.</p>
+                <form id="family-medicine-request-form" class="family-medicine-request-form">
+                    <h4>Request medicine</h4>
+                    <div class="clinical-field-row">
+                        <div class="form-group">
+                            <label for="family-medicine-request-name">Medicine requested</label>
+                            <input id="family-medicine-request-name" type="text" maxlength="120" placeholder="Medicine name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="family-medicine-request-note">Reason / note</label>
+                            <input id="family-medicine-request-note" type="text" maxlength="300" placeholder="Optional note for the doctor">
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Send to doctor</button>
+                    <p id="family-medicine-request-status" class="form-status" role="status" aria-live="polite"></p>
+                </form>
                 <div id="family-clinical-list" class="clinical-list"></div>
             </section>
         </div>

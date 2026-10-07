@@ -2317,6 +2317,12 @@ function setClinicalBadge(id, count) {
 function buildClinicalDetails(item) {
     const wrap = clinicalEl('div', 'clinical-details');
 
+    if (item.type === 'family-medicine-request') {
+        wrap.append(clinicalEl('p', 'clinical-medicine-line', item.familyRequest?.medicineName || 'Medicine requested'));
+        if (item.familyRequest?.note) wrap.append(clinicalEl('p', 'muted-text', item.familyRequest.note));
+        return wrap;
+    }
+
     if (item.type === 'medicine') {
         wrap.append(clinicalEl('p', 'clinical-medicine-line', formatClinicalMedicine(item.medicine)));
         if (item.medicine?.instructions) wrap.append(clinicalEl('p', 'muted-text', item.medicine.instructions));
@@ -2357,7 +2363,7 @@ function buildClinicalCard(item, options = {}) {
     const card = clinicalEl('article', 'clinical-card');
     const head = clinicalEl('div', 'clinical-card-head');
     const titleWrap = clinicalEl('div');
-    titleWrap.append(clinicalEl('h4', '', item.type === 'medicine' ? 'Medicine request' : 'Blood result'));
+    titleWrap.append(clinicalEl('h4', '', ['medicine', 'family-medicine-request'].includes(item.type) ? 'Medicine request' : 'Blood result'));
 
     const metaParts = [];
     if (options.showPatient) metaParts.push(item.patientName || 'Patient');
@@ -2414,11 +2420,25 @@ async function fetchClinicalRequests() {
     }
 }
 
+function clinicalApiUnavailableMessage() {
+    return 'Clinical requests are not available yet. Deploy the latest API from GitHub main to Railway, then reload this page.';
+}
+
 async function loadDoctorClinicalRequests(patients) {
     if (Array.isArray(patients)) populateClinicalPatientSelects(patients);
 
     const items = await fetchClinicalRequests();
-    if (!items) return;
+    if (!items) {
+        const attention = document.getElementById('doctor-clinical-attention');
+        const attentionList = document.getElementById('doctor-clinical-attention-list');
+        const list = document.getElementById('doctor-clinical-list');
+        if (attention && attentionList) {
+            attention.hidden = false;
+            attentionList.replaceChildren(clinicalEl('p', 'muted-text', clinicalApiUnavailableMessage()));
+        }
+        if (list) list.replaceChildren(clinicalEl('p', 'muted-text', clinicalApiUnavailableMessage()));
+        return;
+    }
 
     const pending = items.filter((item) => item.status === 'awaiting_doctor');
     const attention = document.getElementById('doctor-clinical-attention');
@@ -2446,6 +2466,10 @@ async function loadDoctorClinicalRequests(patients) {
 }
 
 function buildDoctorDecisionActions(item) {
+    if (item.type === 'family-medicine-request') {
+        return buildFamilyMedicineDecisionForm(item);
+    }
+
     const actions = clinicalEl('div', 'clinical-actions');
     const approve = clinicalEl('button', 'btn btn-small btn-success', 'Approve change');
     const reject = clinicalEl('button', 'btn btn-small btn-danger', 'Reject');
@@ -2456,12 +2480,46 @@ function buildDoctorDecisionActions(item) {
     return actions;
 }
 
-async function decideClinicalRequest(requestId, decision, button) {
+function buildFamilyMedicineDecisionForm(item) {
+    const form = clinicalEl('form', 'clinical-change-form doctor-medicine-approval-form');
+    const fields = {};
+    [
+        ['name', 'Medicine to prescribe', 120, item.familyRequest?.medicineName || ''],
+        ['dose', 'Dose', 60, ''],
+        ['frequency', 'Frequency', 80, ''],
+        ['duration', 'Duration', 60, ''],
+        ['instructions', 'Instructions', 300, '']
+    ].forEach(([key, label, maxLength, value]) => {
+        const input = clinicalInput('text', label, maxLength, value);
+        input.required = ['name', 'dose', 'frequency'].includes(key);
+        fields[key] = input;
+        form.append(input);
+    });
+
+    const actions = clinicalEl('div', 'clinical-actions');
+    const approve = clinicalEl('button', 'btn btn-small btn-success', 'Approve & send to nurse');
+    approve.type = 'submit';
+    const reject = clinicalEl('button', 'btn btn-small btn-danger', 'Reject request');
+    reject.type = 'button';
+    reject.addEventListener('click', () => decideClinicalRequest(item.id, 'reject', reject));
+    actions.append(approve, reject);
+    form.append(actions);
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        decideClinicalRequest(item.id, 'approve', approve, {
+            medicine: Object.fromEntries(Object.entries(fields).map(([key, input]) => [key, input.value.trim()]))
+        });
+    });
+    return form;
+}
+
+async function decideClinicalRequest(requestId, decision, button, extra = {}) {
     button.disabled = true;
     try {
         const response = await apiCall(`/clinical-requests/${requestId}/doctor-decision`, {
             method: 'POST',
-            body: JSON.stringify({ decision })
+            body: JSON.stringify({ decision, ...extra })
         });
         const result = response ? await response.json().catch(() => ({})) : {};
         if (!response || !response.ok) {
@@ -2480,7 +2538,13 @@ async function decideClinicalRequest(requestId, decision, button) {
 
 async function loadStaffClinicalRequests(force = false) {
     const items = await fetchClinicalRequests();
-    if (!items) return;
+    if (!items) {
+        const unavailable = clinicalEl('p', 'clinical-api-unavailable', clinicalApiUnavailableMessage());
+        document.getElementById('staff-clinical-queue')?.replaceChildren(unavailable.cloneNode(true));
+        document.getElementById('staff-clinical-recent')?.replaceChildren(unavailable.cloneNode(true));
+        setClinicalBadge('staff-clinical-badge', 0);
+        return;
+    }
 
     const queue = items.filter((item) => item.status === 'awaiting_nurse');
     setClinicalBadge('staff-clinical-badge', queue.length);
@@ -2586,10 +2650,51 @@ async function loadFamilyClinicalRecords() {
     if (!list) return;
 
     const items = await fetchClinicalRequests();
-    if (!items) return;
+    if (!items) {
+        list.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', clinicalApiUnavailableMessage()));
+        return;
+    }
     list.replaceChildren(...(items.length
         ? items.map((item) => buildClinicalCard(item, { family: true }))
         : [clinicalEl('p', 'muted-text', 'Nothing has been approved yet.')]));
+}
+
+function setupFamilyMedicineRequestForm() {
+    const form = document.getElementById('family-medicine-request-form');
+    const status = document.getElementById('family-medicine-request-status');
+    if (!form || !status) return;
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        status.textContent = 'Sending to the assigned doctor...';
+
+        try {
+            const response = await apiCall('/clinical-requests', {
+                method: 'POST',
+                body: JSON.stringify({
+                    type: 'family-medicine-request',
+                    medicineName: document.getElementById('family-medicine-request-name').value.trim(),
+                    note: document.getElementById('family-medicine-request-note').value.trim()
+                })
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok) {
+                status.textContent = result.error || clinicalApiUnavailableMessage();
+                return;
+            }
+
+            form.reset();
+            status.textContent = result.message || 'Request sent to the assigned doctor.';
+            await loadFamilyClinicalRecords();
+        } catch (error) {
+            console.error('Error submitting family medicine request:', error);
+            status.textContent = clinicalApiUnavailableMessage();
+        } finally {
+            button.disabled = false;
+        }
+    });
 }
 
 function addBloodRow(values = {}) {
@@ -3529,6 +3634,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAdminMourningForm();
     setupAdminDoctorForm();
     setupClinicalForms();
+    setupFamilyMedicineRequestForm();
     const doctorLeaveForm = document.getElementById('doctor-leave-form');
     if (doctorLeaveForm) {
         doctorLeaveForm.addEventListener('submit', submitDoctorLeave);
