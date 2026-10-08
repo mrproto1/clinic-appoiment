@@ -32,7 +32,7 @@ if (($segments[0] ?? '') === 'chat') {
 
 initialize_data_store();
 
-$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests'];
+$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests', 'death-certificates'];
 while (!empty($segments) && !in_array($segments[0], $allowedResources, true)) {
     array_shift($segments);
 }
@@ -72,6 +72,9 @@ switch ($resource) {
         break;
     case 'clinical-requests':
         handle_clinical_request_routes($requestMethod, $segments, $body);
+        break;
+    case 'death-certificates':
+        handle_death_certificate_routes($requestMethod, $segments, $body);
         break;
     default:
         respond(404, ['error' => 'Route not found']);
@@ -372,7 +375,8 @@ function get_collection_table($name)
         'leaves' => 'collection_leaves',
         'bulletins' => 'collection_bulletins',
         'site_settings' => 'collection_site_settings',
-        'clinical_requests' => 'collection_clinical_requests'
+        'clinical_requests' => 'collection_clinical_requests',
+        'death_certificates' => 'collection_death_certificates'
     ];
 
     if (!isset($allowed[$name])) {
@@ -2272,6 +2276,143 @@ function handle_clinical_request_routes($method, $segments, $body)
     respond(404, ['error' => 'Route not found']);
 }
 
+function public_death_certificate($record)
+{
+    return [
+        'id' => (int)$record['id'],
+        'certificateNumber' => (string)($record['certificateNumber'] ?? ''),
+        'patientName' => (string)($record['patientName'] ?? ''),
+        'patientCode' => (string)($record['patientCode'] ?? ''),
+        'deathDate' => (string)($record['deathDate'] ?? ''),
+        'deathTime' => (string)($record['deathTime'] ?? ''),
+        'place' => (string)($record['place'] ?? ''),
+        'cause' => (string)($record['cause'] ?? ''),
+        'doctorName' => (string)($record['doctorName'] ?? ''),
+        'approvedAt' => $record['approvedAt'] ?? null,
+        'reviewedBy' => (string)($record['reviewedBy'] ?? ''),
+        'status' => (string)($record['status'] ?? ''),
+        'officialDocument' => false
+    ];
+}
+
+function handle_death_certificate_routes($method, $segments, $body)
+{
+    $user = require_auth(['doctor', 'admin', 'family']);
+    $role = (string)$user['role'];
+
+    if ($method === 'GET' && count($segments) === 1) {
+        $records = read_data('death_certificates');
+        if ($role === 'doctor') {
+            $doctorIds = get_doctor_alias_ids((int)$user['id']);
+            $records = array_filter($records, function ($record) use ($doctorIds) {
+                return in_array((int)($record['doctorId'] ?? 0), $doctorIds, true);
+            });
+        } elseif ($role === 'family') {
+            $patient = find_patient_for_user($user);
+            $patientId = $patient ? (int)$patient['id'] : 0;
+            $records = array_filter($records, function ($record) use ($patientId) {
+                return $patientId > 0
+                    && (int)($record['patientId'] ?? 0) === $patientId
+                    && ($record['status'] ?? '') === 'approved';
+            });
+        }
+
+        $records = array_values($records);
+        usort($records, function ($a, $b) {
+            return strcmp((string)($b['deathDate'] ?? ''), (string)($a['deathDate'] ?? ''));
+        });
+        if ($role === 'family') {
+            $records = array_map('public_death_certificate', $records);
+        }
+        respond(200, $records);
+    }
+
+    if ($method === 'POST' && count($segments) === 1) {
+        if ($role !== 'doctor') {
+            respond(403, ['error' => 'Only the assigned doctor can submit a hospital death record']);
+        }
+
+        $patient = find_by_id('patients', (int)($body['patientId'] ?? 0));
+        if (!$patient) {
+            respond(404, ['error' => 'Patient not found']);
+        }
+        if (!in_array((int)($patient['assignedDoctor'] ?? 0), get_doctor_alias_ids((int)$user['id']), true)) {
+            respond(403, ['error' => 'You can only submit a record for a patient assigned to you']);
+        }
+
+        $deathDate = trim((string)($body['deathDate'] ?? ''));
+        $deathTime = trim((string)($body['deathTime'] ?? ''));
+        if (!valid_iso_date($deathDate) || $deathDate > gmdate('Y-m-d')) {
+            respond(400, ['error' => 'Enter a valid death date that is not in the future']);
+        }
+        if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $deathTime)) {
+            respond(400, ['error' => 'Enter a valid 24-hour time']);
+        }
+
+        $place = clinical_text($body['place'] ?? '', 180, true);
+        $cause = clinical_text($body['cause'] ?? '', 500, true);
+        if ($place === null || $cause === null || strlen($cause) < 3) {
+            respond(400, ['error' => 'Place and cause of death are required']);
+        }
+
+        $record = add_row('death_certificates', [
+            'patientId' => (int)$patient['id'],
+            'patientName' => (string)($patient['name'] ?? ''),
+            'patientCode' => (string)($patient['patientCode'] ?? ''),
+            'deathDate' => $deathDate,
+            'deathTime' => $deathTime,
+            'place' => $place,
+            'cause' => $cause,
+            'doctorId' => (int)$user['id'],
+            'doctorName' => (string)($user['name'] ?? ''),
+            'status' => 'awaiting_admin',
+            'officialDocument' => false
+        ]);
+        $certificateNumber = sprintf('HDC-%s-%05d', substr($deathDate, 0, 4), (int)$record['id']);
+        $record = update_row('death_certificates', (int)$record['id'], ['certificateNumber' => $certificateNumber]);
+        respond(201, ['message' => 'Hospital record submitted for admin review', 'record' => $record]);
+    }
+
+    if ($method === 'POST' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'review') {
+        if ($role !== 'admin') {
+            respond(403, ['error' => 'Only an admin can review this hospital record']);
+        }
+
+        $recordId = (int)$segments[1];
+        $record = find_by_id('death_certificates', $recordId);
+        if (!$record) {
+            respond(404, ['error' => 'Hospital death record not found']);
+        }
+        if (($record['status'] ?? '') !== 'awaiting_admin') {
+            respond(409, ['error' => 'This record is no longer waiting for review']);
+        }
+
+        $decision = trim((string)($body['decision'] ?? ''));
+        if (!in_array($decision, ['approve', 'reject'], true)) {
+            respond(400, ['error' => 'Decision must be approve or reject']);
+        }
+
+        $note = clinical_text($body['note'] ?? '', 300);
+        if ($note === null || ($decision === 'reject' && strlen($note) < 3)) {
+            respond(400, ['error' => 'A rejection reason of 3-300 characters is required']);
+        }
+
+        $updates = [
+            'status' => $decision === 'approve' ? 'approved' : 'rejected',
+            'reviewedBy' => (string)($user['name'] ?? ''),
+            'reviewNote' => $note,
+            'reviewedAt' => gmdate('c')
+        ];
+        if ($decision === 'approve') {
+            $updates['approvedAt'] = gmdate('c');
+        }
+        $updated = update_row('death_certificates', $recordId, $updates);
+        respond(200, ['message' => $decision === 'approve' ? 'Hospital record approved for linked family access' : 'Hospital record rejected', 'record' => $updated]);
+    }
+
+    respond(404, ['error' => 'Route not found']);
+}
+
 function handle_site_status_routes($method, $segments, $body)
 {
     if ($method === 'GET' && count($segments) === 1) {
@@ -2445,7 +2586,7 @@ function to_minutes($hhmm)
 
 function initialize_data_store()
 {
-    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests'] as $collection) {
+    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates'] as $collection) {
         ensure_collection_table($collection);
     }
 

@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=family-medicine-20261007">
+    <link rel="stylesheet" href="css/styles.css?v=death-records-20261008">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=family-medicine-20261007b" defer></script>
+    <script src="js/dashboard.js?v=death-records-20261008" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -45,6 +45,9 @@
                 <li id="doctor-menu-6" style="display: none;">
                     <a href="#" onclick="switchSection('doctor-clinical-section')" class="nav-link">Medicine &amp; Results <span id="doctor-clinical-badge" class="nav-badge" hidden>0</span></a>
                 </li>
+                <li id="doctor-menu-7" style="display: none;">
+                    <a href="#" onclick="switchSection('doctor-death-section')" class="nav-link">Death Records</a>
+                </li>
                 
                 <!-- STAFF MENU -->
                 <li id="staff-menu" style="display: none;">
@@ -75,6 +78,9 @@
                 </li>
                 <li id="admin-menu-6" style="display: none;">
                     <a href="#" onclick="switchSection('admin-doctors-section')" class="nav-link">Doctors</a>
+                </li>
+                <li id="admin-menu-7" style="display: none;">
+                    <a href="#" onclick="switchSection('admin-death-section')" class="nav-link">Death Records</a>
                 </li>
                 
                 <!-- PATIENT MENU -->
@@ -308,6 +314,44 @@
             </div>
         </div>
 
+        <div id="doctor-death-section" class="content-section">
+            <div class="header">
+                <h1>Hospital Death Records</h1>
+            </div>
+            <p class="death-record-notice">Hospital record copy only. This is not a government-issued death certificate and cannot replace civil registry documentation.</p>
+            <form id="doctor-death-form" class="card death-record-form">
+                <h3>Submit record for admin review</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="doctor-death-patient">Assigned patient</label>
+                        <select id="doctor-death-patient" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="doctor-death-date">Date of death</label>
+                        <input id="doctor-death-date" type="date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="doctor-death-time">Time of death</label>
+                        <input id="doctor-death-time" type="time" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="doctor-death-place">Place</label>
+                        <input id="doctor-death-place" type="text" maxlength="180" placeholder="Hospital / ward" required>
+                    </div>
+                    <div class="form-group death-cause-field">
+                        <label for="doctor-death-cause">Cause recorded by attending doctor</label>
+                        <textarea id="doctor-death-cause" rows="3" maxlength="500" required></textarea>
+                    </div>
+                </div>
+                <button class="btn btn-primary" type="submit">Submit for admin review</button>
+                <p id="doctor-death-status" class="form-status" role="status" aria-live="polite"></p>
+            </form>
+            <div class="card">
+                <h3>My submitted records</h3>
+                <div id="doctor-death-list" class="death-record-list"></div>
+            </div>
+        </div>
+
         <!-- DOCTOR->STAFF MESSAGE -->
         <div id="doctor-staff-section" class="content-section">
             <div class="header">
@@ -529,6 +573,22 @@
             </div>
         </div>
 
+        <div id="admin-death-section" class="content-section">
+            <div class="header">
+                <h1>Death Record Review</h1>
+                <button class="btn btn-primary" onclick="switchSection('admin-section')">← Back</button>
+            </div>
+            <p class="death-record-notice">Review hospital records only. These are not government-issued death certificates.</p>
+            <div class="card">
+                <h3>Waiting for review</h3>
+                <div id="admin-death-pending" class="death-record-list"></div>
+            </div>
+            <div class="card">
+                <h3>Recent records</h3>
+                <div id="admin-death-recent" class="death-record-list"></div>
+            </div>
+        </div>
+
         <div id="admin-bulletins-section" class="content-section">
             <div class="header">
                 <h1>Hospital Bulletin</h1>
@@ -694,6 +754,11 @@
                 </form>
                 <div id="family-clinical-list" class="clinical-list"></div>
             </section>
+            <section id="family-death-records" class="card family-death-records" aria-labelledby="family-death-title">
+                <h3 id="family-death-title">Hospital death records</h3>
+                <p class="death-record-notice">Approved hospital record copies only. Not valid as government-issued death certificates.</p>
+                <div id="family-death-list" class="death-record-list"></div>
+            </section>
         </div>
 
         <!-- PATIENT MESSAGES -->
@@ -832,9 +897,9 @@
         // Menu item display based on role
         function showRoleMenu(role) {
             const menus = {
-                'doctor': ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4'],
+                'doctor': ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5', 'doctor-menu-6', 'doctor-menu-7'],
                 'staff': ['staff-menu', 'staff-menu-2'],
-                'admin': ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5'],
+                'admin': ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7'],
                 'patient': ['patient-menu', 'patient-menu-2'],
                 'family': ['patient-menu', 'family-menu']
             };

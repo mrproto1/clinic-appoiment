@@ -417,9 +417,9 @@ async function initializeDashboard() {
 
 function showDashboardRoleMenu(role) {
     const menuIds = {
-        doctor: ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5', 'doctor-menu-6'],
+        doctor: ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5', 'doctor-menu-6', 'doctor-menu-7'],
         staff: ['staff-menu', 'staff-menu-2', 'staff-menu-3'],
-        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6'],
+        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7'],
         patient: ['patient-menu', 'patient-menu-2'],
         family: ['family-menu', 'patient-menu', 'patient-menu-2']
     };
@@ -578,6 +578,7 @@ async function loadDoctorDashboard() {
         renderDoctorOperationSchedule(doctorProfile);
         startLivePatientTelemetry(assignedPatients);
         loadDoctorClinicalRequests(assignedPatients);
+        loadDoctorDeathRecords(assignedPatients);
     } catch (error) {
         console.error('Error loading doctor dashboard:', error);
     }
@@ -1802,6 +1803,7 @@ async function loadAdminDashboard() {
         displayAdminLeaves(leaves);
         displayAdminBulletins(bulletins);
         if (siteStatus) displayMourningSettings(siteStatus);
+        loadAdminDeathRecords();
     } catch (error) {
         console.error('Error loading admin dashboard:', error);
     }
@@ -2758,6 +2760,250 @@ async function submitClinicalRequest(payload, status, button) {
     }
 }
 
+const DEATH_RECORD_STATUS_LABELS = {
+    awaiting_admin: 'Waiting for admin review',
+    approved: 'Approved',
+    rejected: 'Rejected'
+};
+let familyDeathRecordsCache = [];
+
+async function fetchDeathRecords() {
+    try {
+        const response = await apiCall('/death-certificates');
+        if (!response || !response.ok) return null;
+        const records = await response.json();
+        return Array.isArray(records) ? records : null;
+    } catch (error) {
+        console.error('Error loading hospital death records:', error);
+        return null;
+    }
+}
+
+function makeDeathRecordCard(record, options = {}) {
+    const card = clinicalEl('article', 'death-record-card');
+    const heading = clinicalEl('div', 'death-record-card-heading');
+    const title = clinicalEl('div');
+    title.append(clinicalEl('h4', '', record.patientName || 'Patient'));
+    title.append(clinicalEl('p', 'muted-text', `${record.patientCode || 'No patient code'} · ${record.certificateNumber || 'Internal reference pending'}`));
+    heading.append(title);
+    heading.append(clinicalEl('span', `clinical-status is-${record.status || 'awaiting_admin'}`, DEATH_RECORD_STATUS_LABELS[record.status] || record.status || 'Pending'));
+    card.append(heading);
+
+    const details = clinicalEl('dl', 'death-record-details');
+    [
+        ['Date and time', [record.deathDate, record.deathTime].filter(Boolean).join(' · ')],
+        ['Place', record.place],
+        ['Cause recorded', record.cause],
+        ['Attending doctor', record.doctorName],
+        ...(record.reviewedBy ? [['Reviewed by', record.reviewedBy]] : []),
+        ...(record.reviewNote ? [['Review note', record.reviewNote]] : [])
+    ].forEach(([label, value]) => {
+        details.append(clinicalEl('dt', '', label), clinicalEl('dd', '', value || '—'));
+    });
+    card.append(details);
+    card.append(clinicalEl('p', 'death-record-watermark-label', 'HOSPITAL RECORD COPY · NOT A GOVERNMENT CERTIFICATE'));
+
+    if (options.review && record.status === 'awaiting_admin') {
+        const actions = clinicalEl('div', 'clinical-actions');
+        const approve = clinicalEl('button', 'btn btn-small btn-success', 'Approve record');
+        const reject = clinicalEl('button', 'btn btn-small btn-danger', 'Reject');
+        approve.type = 'button';
+        reject.type = 'button';
+        approve.addEventListener('click', () => reviewDeathRecord(record.id, 'approve', approve));
+        reject.addEventListener('click', () => reviewDeathRecord(record.id, 'reject', reject));
+        actions.append(approve, reject);
+        card.append(actions);
+    }
+
+    if (options.print && record.status === 'approved') {
+        const print = clinicalEl('button', 'btn btn-small btn-secondary', 'Print hospital copy');
+        print.type = 'button';
+        print.addEventListener('click', () => printHospitalDeathRecord(record.id));
+        card.append(print);
+    }
+    return card;
+}
+
+function showDeathApiUnavailable(container) {
+    if (container) container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Death record service is unavailable. Deploy the latest API from GitHub main to Railway, then reload.'));
+}
+
+async function loadDoctorDeathRecords(patients) {
+    const patientSelect = document.getElementById('doctor-death-patient');
+    const list = document.getElementById('doctor-death-list');
+    if (patientSelect && Array.isArray(patients)) {
+        const previous = patientSelect.value;
+        patientSelect.replaceChildren(new Option('-- Select assigned patient --', ''));
+        patients.filter((patient) => patient.status !== 'discharged').forEach((patient) => {
+            patientSelect.append(new Option(`${patient.patientCode || 'N/A'} - ${patient.name}`, String(patient.id)));
+        });
+        if (previous && patients.some((patient) => String(patient.id) === previous)) patientSelect.value = previous;
+    }
+
+    const records = await fetchDeathRecords();
+    if (!records) {
+        showDeathApiUnavailable(list);
+        return;
+    }
+    list?.replaceChildren(...(records.length
+        ? records.map((record) => makeDeathRecordCard(record))
+        : [clinicalEl('p', 'muted-text', 'No death records submitted by this doctor.')]));
+}
+
+async function loadAdminDeathRecords() {
+    const pendingList = document.getElementById('admin-death-pending');
+    const recentList = document.getElementById('admin-death-recent');
+    const records = await fetchDeathRecords();
+    if (!records) {
+        showDeathApiUnavailable(pendingList);
+        showDeathApiUnavailable(recentList);
+        return;
+    }
+
+    const pending = records.filter((record) => record.status === 'awaiting_admin');
+    const recent = records.filter((record) => record.status !== 'awaiting_admin').slice(0, 20);
+    pendingList?.replaceChildren(...(pending.length
+        ? pending.map((record) => makeDeathRecordCard(record, { review: true }))
+        : [clinicalEl('p', 'muted-text', 'No death records are waiting for review.')]));
+    recentList?.replaceChildren(...(recent.length
+        ? recent.map((record) => makeDeathRecordCard(record))
+        : [clinicalEl('p', 'muted-text', 'No reviewed records yet.')]));
+}
+
+async function loadFamilyDeathRecords() {
+    const list = document.getElementById('family-death-list');
+    const records = await fetchDeathRecords();
+    if (!records) {
+        showDeathApiUnavailable(list);
+        return;
+    }
+    familyDeathRecordsCache = records;
+    list?.replaceChildren(...(records.length
+        ? records.map((record) => makeDeathRecordCard(record, { print: true }))
+        : [clinicalEl('p', 'muted-text', 'No approved hospital death records are available for this family account.')]));
+}
+
+async function reviewDeathRecord(recordId, decision, button) {
+    let note = '';
+    if (decision === 'reject') {
+        note = window.prompt('Reason for rejecting this hospital record (required):') || '';
+        if (note.trim().length < 3) {
+            showNotification('Enter a rejection reason of at least 3 characters.', 'warning');
+            return;
+        }
+    }
+
+    button.disabled = true;
+    try {
+        const response = await apiCall(`/death-certificates/${recordId}/review`, {
+            method: 'POST',
+            body: JSON.stringify({ decision, note })
+        });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to save the death record review.', 'danger');
+            return;
+        }
+        showNotification(result.message || 'Review saved.', 'success');
+        await loadAdminDeathRecords();
+    } catch (error) {
+        console.error('Error reviewing death record:', error);
+        showNotification('Unable to save the death record review.', 'danger');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function escapeDeathCertificateText(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[character]);
+}
+
+function printHospitalDeathRecord(recordId) {
+    const record = familyDeathRecordsCache.find((item) => Number(item.id) === Number(recordId));
+    if (!record || record.status !== 'approved' || record.officialDocument !== false) return;
+
+    const printWindow = window.open('', '_blank', 'width=900,height=800');
+    if (!printWindow) {
+        showNotification('Allow pop-ups to print this hospital copy.', 'warning');
+        return;
+    }
+
+    const text = escapeDeathCertificateText;
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Hospital Death Record Copy</title><style>
+        body{font:16px Georgia,serif;color:#202c34;margin:48px auto;max-width:760px;padding:0 28px;line-height:1.55}
+        .warning{padding:12px;border:2px solid #9b3c3c;color:#812e2e;text-align:center;font:bold 13px Arial,sans-serif;letter-spacing:.05em}
+        h1{text-align:center;font-size:26px;margin:28px 0 4px}.sub{text-align:center;color:#667780;font:12px Arial,sans-serif}
+        .number{margin:28px 0;padding:10px;background:#f1f4f5;text-align:center;font:13px Arial,sans-serif}
+        dl{display:grid;grid-template-columns:180px 1fr;gap:12px;margin-top:30px}dt{color:#596c76;font:bold 12px Arial,sans-serif;text-transform:uppercase}dd{margin:0;border-bottom:1px solid #dce2e4;padding-bottom:8px}
+        .watermark{margin:46px 0 12px;color:#a33a3a;text-align:center;font:bold 19px Arial,sans-serif;transform:rotate(-4deg)}
+        .disclaimer{margin-top:28px;padding-top:14px;border-top:2px solid #9b3c3c;color:#702c2c;font:12px Arial,sans-serif}
+        @media print{body{margin:20mm auto}.watermark{color:#a33a3a}}
+    </style></head><body>
+        <div class="warning">HOSPITAL RECORD COPY · NOT A GOVERNMENT-ISSUED CERTIFICATE</div>
+        <h1>Hospital Death Record</h1><p class="sub">Internal hospital record · Not a civil registry document</p>
+        <p class="number">Internal reference: ${text(record.certificateNumber)}</p>
+        <dl>
+            <dt>Patient</dt><dd>${text(record.patientName)}</dd>
+            <dt>Patient record</dt><dd>${text(record.patientCode)}</dd>
+            <dt>Date of death</dt><dd>${text(record.deathDate)}</dd>
+            <dt>Time of death</dt><dd>${text(record.deathTime)}</dd>
+            <dt>Place</dt><dd>${text(record.place)}</dd>
+            <dt>Cause recorded</dt><dd>${text(record.cause)}</dd>
+            <dt>Attending doctor</dt><dd>${text(record.doctorName)}</dd>
+            <dt>Reviewed by</dt><dd>${text(record.reviewedBy)}</dd>
+        </dl>
+        <div class="watermark">NON-OFFICIAL HOSPITAL COPY</div>
+        <p class="disclaimer">This is an internal hospital record copy only. It is not a government-issued death certificate, does not certify civil status, and cannot replace documentation from the relevant civil registry.</p>
+        <script>window.onload=()=>window.print()</script></body></html>`);
+    printWindow.document.close();
+}
+
+function setupDeathCertificateForm() {
+    const form = document.getElementById('doctor-death-form');
+    const status = document.getElementById('doctor-death-status');
+    if (!form || !status) return;
+
+    const dateInput = document.getElementById('doctor-death-date');
+    const today = new Date();
+    dateInput.max = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        status.textContent = 'Submitting for admin review...';
+        try {
+            const response = await apiCall('/death-certificates', {
+                method: 'POST',
+                body: JSON.stringify({
+                    patientId: Number(document.getElementById('doctor-death-patient').value),
+                    deathDate: dateInput.value,
+                    deathTime: document.getElementById('doctor-death-time').value,
+                    place: document.getElementById('doctor-death-place').value.trim(),
+                    cause: document.getElementById('doctor-death-cause').value.trim()
+                })
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok || !result.record?.id) {
+                status.textContent = result.error || 'Death record service unavailable. Deploy the latest API to Railway.';
+                return;
+            }
+            const patientId = document.getElementById('doctor-death-patient').value;
+            form.reset();
+            document.getElementById('doctor-death-patient').value = patientId;
+            status.textContent = `Submitted for review. Internal reference: ${result.record.certificateNumber}.`;
+            await loadDoctorDeathRecords();
+        } catch (error) {
+            console.error('Error submitting death record:', error);
+            status.textContent = 'Death record service unavailable. Deploy the latest API to Railway.';
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
 function setupClinicalForms() {
     const medicineForm = document.getElementById('clinical-medicine-form');
     const bloodForm = document.getElementById('clinical-blood-form');
@@ -3036,6 +3282,7 @@ async function loadFamilyDashboard() {
         patientAssignedDoctorId = Number(patient.assignedDoctor) || null;
         renderPatientHealthPanel(patient, 'family-content');
         loadFamilyClinicalRecords();
+        loadFamilyDeathRecords();
     } catch (error) {
         console.error('Error loading family dashboard:', error);
         container.innerHTML = `
@@ -3633,6 +3880,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAdminDoctorForm();
     setupClinicalForms();
     setupFamilyMedicineRequestForm();
+    setupDeathCertificateForm();
     const doctorLeaveForm = document.getElementById('doctor-leave-form');
     if (doctorLeaveForm) {
         doctorLeaveForm.addEventListener('submit', submitDoctorLeave);
