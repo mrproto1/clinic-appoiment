@@ -2932,33 +2932,64 @@ function printHospitalDeathRecord(recordId) {
     }
 
     const text = escapeDeathCertificateText;
+    const doctorDate = record.doctorAttestedAt ? new Date(record.doctorAttestedAt).toLocaleString() : '—';
+    const adminDate = record.approvedAt ? new Date(record.approvedAt).toLocaleString() : '—';
+    const issueDate = new Date(record.approvedAt || Date.now()).toLocaleDateString();
     printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Hospital Death Record Copy</title><style>
-        body{font:16px Georgia,serif;color:#202c34;margin:48px auto;max-width:760px;padding:0 28px;line-height:1.55}
-        .warning{padding:12px;border:2px solid #9b3c3c;color:#812e2e;text-align:center;font:bold 13px Arial,sans-serif;letter-spacing:.05em}
-        h1{text-align:center;font-size:26px;margin:28px 0 4px}.sub{text-align:center;color:#667780;font:12px Arial,sans-serif}
-        .number{margin:28px 0;padding:10px;background:#f1f4f5;text-align:center;font:13px Arial,sans-serif}
-        dl{display:grid;grid-template-columns:180px 1fr;gap:12px;margin-top:30px}dt{color:#596c76;font:bold 12px Arial,sans-serif;text-transform:uppercase}dd{margin:0;border-bottom:1px solid #dce2e4;padding-bottom:8px}
-        .watermark{margin:46px 0 12px;color:#a33a3a;text-align:center;font:bold 19px Arial,sans-serif;transform:rotate(-4deg)}
-        .disclaimer{margin-top:28px;padding-top:14px;border-top:2px solid #9b3c3c;color:#702c2c;font:12px Arial,sans-serif}
-        @media print{body{margin:20mm auto}.watermark{color:#a33a3a}}
-    </style></head><body>
-        <div class="warning">HOSPITAL RECORD COPY · NOT A GOVERNMENT-ISSUED CERTIFICATE</div>
-        <h1>Hospital Death Record</h1><p class="sub">Internal hospital record · Not a civil registry document</p>
-        <p class="number">Internal reference: ${text(record.certificateNumber)}</p>
-        <dl>
-            <dt>Patient</dt><dd>${text(record.patientName)}</dd>
-            <dt>Patient record</dt><dd>${text(record.patientCode)}</dd>
-            <dt>Date of death</dt><dd>${text(record.deathDate)}</dd>
-            <dt>Time of death</dt><dd>${text(record.deathTime)}</dd>
-            <dt>Place</dt><dd>${text(record.place)}</dd>
-            <dt>Cause recorded</dt><dd>${text(record.cause)}</dd>
-            <dt>Attending doctor</dt><dd>${text(record.doctorName)}</dd>
-            <dt>Doctor confirmed</dt><dd>${text(record.doctorAttestedBy || record.doctorName)}</dd>
-            <dt>Admin approved</dt><dd>${text(record.adminApprovedBy || record.reviewedBy)}</dd>
-        </dl>
-        <div class="watermark">NON-OFFICIAL HOSPITAL COPY</div>
-        <p class="disclaimer">This is an internal hospital record copy only. It is not a government-issued death certificate, does not certify civil status, and cannot replace documentation from the relevant civil registry.</p>
-        <script>window.onload=()=>window.print()</script></body></html>`);
+        @page{size:A4 landscape;margin:0}
+        *{box-sizing:border-box}
+        body{margin:0;background:#e7e9e9;color:#192c40;font:12px Georgia,'Times New Roman',serif}
+        .sheet{position:relative;display:grid;grid-template-columns:48mm minmax(0,1fr);width:297mm;min-height:210mm;margin:0 auto;background:#fbfaf6;overflow:hidden}
+        .rail{position:relative;display:flex;flex-direction:column;justify-content:space-between;padding:13mm 8mm 10mm;color:#f8f5ec;background:#132e49;border-right:2px solid #c69a4b}
+        .brand{text-align:center}.brand-mark{margin:0 auto 8px;font-size:42px;line-height:1}.brand-name{font-size:16px;line-height:1.15;letter-spacing:.04em}.brand-sub{margin-top:8px;color:#d5c18e;font:7px Arial,sans-serif;letter-spacing:.16em;text-transform:uppercase}
+        .rail-foot{color:#d9e0e3;font:8px/1.6 Arial,sans-serif;letter-spacing:.12em;text-transform:uppercase}
+        .content{position:relative;z-index:0;padding:8mm 10mm 7mm}
+        .topline{display:grid;grid-template-columns:1fr 42mm;align-items:start;gap:8mm}
+        h1{margin:0;text-align:center;font-size:24px;letter-spacing:.045em;text-transform:uppercase}
+        .subtitle{margin:4px 0 8px;text-align:center;font:9px Arial,sans-serif;letter-spacing:.28em;text-transform:uppercase}
+        .ref{padding:3px 0;color:#132e49;text-align:right;font:8px/1.5 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase}
+        .ref strong{display:block;color:#a53731;font:17px Georgia,serif;letter-spacing:.06em}
+        .warning{margin:5mm 0 4mm;padding:7px 10px;color:#8e302d;background:#fff3eb;border:1px solid #d5a278;text-align:center;font:bold 9px Arial,sans-serif;letter-spacing:.1em}
+        .section{margin-top:3mm;border:1px solid #d8d7ce}
+        .section-title{padding:5px 8px;color:#fff;background:#193952;border-bottom:2px solid #c69a4b;font:bold 9px Arial,sans-serif;letter-spacing:.06em;text-transform:uppercase}
+        .section-body{padding:7px 9px}
+        .fields{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:8px 12px}
+        .field{min-width:0;min-height:27px;border-bottom:1px solid #aeb6b7}
+        .field.wide{grid-column:1/-1}.field-label{display:block;margin-bottom:2px;color:#526474;font:7px Arial,sans-serif;letter-spacing:.07em;text-transform:uppercase}.field-value{display:block;min-height:13px;color:#1d2d3c;font-size:11px;overflow-wrap:anywhere}
+        .death-grid{display:grid;grid-template-columns:1fr 1fr 1.35fr;gap:14px;padding:8px 10px}
+        .cause-layout{display:grid;grid-template-columns:27mm 1fr;min-height:33mm}
+        .cause-label{padding:8px;color:#21384b;background:#f0eee7;border-right:1px solid #d8d7ce;font:bold 9px Arial,sans-serif}.cause-label span{display:block;margin-top:3px;color:#61717a;font:italic 8px Georgia,serif}
+        .cause-value{padding:8px 10px;color:#1d2d3c;font-size:12px;line-height:1.5}
+        .attestations{display:grid;grid-template-columns:1fr 1fr;gap:0}.attestation{padding:8px 10px;min-height:33mm}.attestation+ .attestation{border-left:1px solid #d8d7ce}.attestation-title{margin:0 0 10px;color:#20394e;font:bold 8px Arial,sans-serif;letter-spacing:.05em;text-transform:uppercase}.attestation-name{font-size:12px;font-weight:bold}.attestation-meta{margin-top:5px;color:#536672;font:8px/1.45 Arial,sans-serif}
+        .bottom{display:flex;justify-content:space-between;gap:10px;align-items:end;margin-top:4mm;padding-top:5px;border-top:2px solid #c69a4b;color:#6a7377;font:7px Arial,sans-serif}.bottom strong{color:#8e302d;font-size:8px;letter-spacing:.05em}
+        .watermark{position:absolute;z-index:-1;top:47%;left:56%;transform:translate(-50%,-50%) rotate(-18deg);color:rgba(153,48,43,.075);font:bold 38px Arial,sans-serif;letter-spacing:.12em;white-space:nowrap;pointer-events:none}
+        @media print{body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}.sheet{margin:0;box-shadow:none}}
+    </style></head><body><main class="sheet">
+        <aside class="rail"><div class="brand"><div class="brand-mark" aria-hidden="true">♡</div><div class="brand-name">THE PROTOCOL<br>HOSPITAL</div><div class="brand-sub">Advanced care · Human touch</div></div><div class="rail-foot">Precision in every decision.<br>Compassion in every moment.</div></aside>
+        <section class="content">
+            <div class="topline"><div><h1>Medical Record of Death</h1><p class="subtitle">The Protocol Hospital · Internal clinical record</p></div><div class="ref">Hospital record ref<strong>${text(record.certificateNumber)}</strong></div></div>
+            <div class="warning">HOSPITAL RECORD COPY · NOT A GOVERNMENT-ISSUED DEATH CERTIFICATE</div>
+            <section class="section"><div class="section-title">A. Particulars of deceased</div><div class="section-body fields">
+                <div class="field"><span class="field-label">Full name</span><span class="field-value">${text(record.patientName)}</span></div>
+                <div class="field"><span class="field-label">Hospital no.</span><span class="field-value">${text(record.patientCode)}</span></div>
+                <div class="field"><span class="field-label">Age</span><span class="field-value">${text(record.patientAge ?? '—')}</span></div>
+                <div class="field"><span class="field-label">Gender</span><span class="field-value">${text(record.patientGender || '—')}</span></div>
+                <div class="field wide"><span class="field-label">Address on patient record</span><span class="field-value">${text(record.patientAddress || '—')}</span></div>
+            </div></section>
+            <section class="section"><div class="section-title">B. Details of death</div><div class="death-grid">
+                <div class="field"><span class="field-label">Date of death</span><span class="field-value">${text(record.deathDate)}</span></div>
+                <div class="field"><span class="field-label">Time of death</span><span class="field-value">${text(record.deathTime)}</span></div>
+                <div class="field"><span class="field-label">Place of death</span><span class="field-value">${text(record.place)}</span></div>
+            </div></section>
+            <section class="section"><div class="section-title">C. Cause recorded by attending medical practitioner</div><div class="cause-layout"><div class="cause-label">Part I<span>Cause recorded by the attending doctor</span></div><div class="cause-value">${text(record.cause)}</div></div></section>
+            <section class="section"><div class="section-title">D. Dual clinical and administrative confirmation</div><div class="attestations">
+                <div class="attestation"><p class="attestation-title">Attending doctor · clinical attestation</p><div class="attestation-name">${text(record.doctorAttestedBy || record.doctorName)}</div><div class="attestation-meta">Doctor in charge<br>Confirmed: ${text(doctorDate)}</div></div>
+                <div class="attestation"><p class="attestation-title">Hospital administration · second approval</p><div class="attestation-name">${text(record.adminApprovedBy || record.reviewedBy)}</div><div class="attestation-meta">Approved: ${text(adminDate)}</div></div>
+            </div></section>
+            <div class="bottom"><span>Issued ${text(issueDate)} · Internal hospital reference only</span><strong>NOT VALID FOR CIVIL REGISTRATION</strong></div>
+            <div class="watermark" aria-hidden="true">HOSPITAL COPY</div>
+        </section>
+    </main><script>window.onload=()=>window.print()</script></body></html>`);
     printWindow.document.close();
 }
 
