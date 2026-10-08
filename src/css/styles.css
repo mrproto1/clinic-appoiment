@@ -5520,6 +5520,28 @@ body.dashboard [hidden] {
     grid-column: 1 / -1;
 }
 
+.death-record-attestation {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    margin: 3px 0 13px;
+    padding: 10px 11px;
+    color: #354a58;
+    background: #f4f8f7;
+    border: 1px solid #dce9e6;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.45;
+}
+
+.death-record-attestation input {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    margin: 1px 0 0;
+}
+
 .death-record-list {
     display: grid;
     gap: 10px;

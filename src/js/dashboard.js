@@ -2795,8 +2795,9 @@ function makeDeathRecordCard(record, options = {}) {
         ['Place', record.place],
         ['Cause recorded', record.cause],
         ['Attending doctor', record.doctorName],
-        ...(record.reviewedBy ? [['Reviewed by', record.reviewedBy]] : []),
-        ...(record.reviewNote ? [['Review note', record.reviewNote]] : [])
+        ['Doctor confirmed', record.doctorAttestedBy ? `${record.doctorAttestedBy}${record.doctorAttestedAt ? ` · ${formatClinicalDate(record.doctorAttestedAt)}` : ''}` : 'Pending'],
+        ...(record.status === 'approved' ? [['Admin approved', record.adminApprovedBy || record.reviewedBy || 'Admin']] : []),
+        ...(record.reviewNote ? [['Admin review note', record.reviewNote]] : [])
     ].forEach(([label, value]) => {
         details.append(clinicalEl('dt', '', label), clinicalEl('dd', '', value || '—'));
     });
@@ -2952,7 +2953,8 @@ function printHospitalDeathRecord(recordId) {
             <dt>Place</dt><dd>${text(record.place)}</dd>
             <dt>Cause recorded</dt><dd>${text(record.cause)}</dd>
             <dt>Attending doctor</dt><dd>${text(record.doctorName)}</dd>
-            <dt>Reviewed by</dt><dd>${text(record.reviewedBy)}</dd>
+            <dt>Doctor confirmed</dt><dd>${text(record.doctorAttestedBy || record.doctorName)}</dd>
+            <dt>Admin approved</dt><dd>${text(record.adminApprovedBy || record.reviewedBy)}</dd>
         </dl>
         <div class="watermark">NON-OFFICIAL HOSPITAL COPY</div>
         <p class="disclaimer">This is an internal hospital record copy only. It is not a government-issued death certificate, does not certify civil status, and cannot replace documentation from the relevant civil registry.</p>
@@ -2982,7 +2984,8 @@ function setupDeathCertificateForm() {
                     deathDate: dateInput.value,
                     deathTime: document.getElementById('doctor-death-time').value,
                     place: document.getElementById('doctor-death-place').value.trim(),
-                    cause: document.getElementById('doctor-death-cause').value.trim()
+                    cause: document.getElementById('doctor-death-cause').value.trim(),
+                    doctorAttested: document.getElementById('doctor-death-attestation').checked
                 })
             });
             const result = response ? await response.json().catch(() => ({})) : {};

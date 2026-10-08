@@ -2288,7 +2288,10 @@ function public_death_certificate($record)
         'place' => (string)($record['place'] ?? ''),
         'cause' => (string)($record['cause'] ?? ''),
         'doctorName' => (string)($record['doctorName'] ?? ''),
+        'doctorAttestedBy' => (string)($record['doctorAttestedBy'] ?? ''),
+        'doctorAttestedAt' => $record['doctorAttestedAt'] ?? null,
         'approvedAt' => $record['approvedAt'] ?? null,
+        'adminApprovedBy' => (string)($record['adminApprovedBy'] ?? ''),
         'reviewedBy' => (string)($record['reviewedBy'] ?? ''),
         'status' => (string)($record['status'] ?? ''),
         'officialDocument' => false
@@ -2339,6 +2342,9 @@ function handle_death_certificate_routes($method, $segments, $body)
         if (!in_array((int)($patient['assignedDoctor'] ?? 0), get_doctor_alias_ids((int)$user['id']), true)) {
             respond(403, ['error' => 'You can only submit a record for a patient assigned to you']);
         }
+        if (($body['doctorAttested'] ?? false) !== true) {
+            respond(400, ['error' => 'The attending doctor must explicitly confirm this record']);
+        }
 
         $deathDate = trim((string)($body['deathDate'] ?? ''));
         $deathTime = trim((string)($body['deathTime'] ?? ''));
@@ -2365,6 +2371,9 @@ function handle_death_certificate_routes($method, $segments, $body)
             'cause' => $cause,
             'doctorId' => (int)$user['id'],
             'doctorName' => (string)($user['name'] ?? ''),
+            'doctorAttestedBy' => (string)($user['name'] ?? ''),
+            'doctorAttestedAt' => gmdate('c'),
+            'doctorAttested' => true,
             'status' => 'awaiting_admin',
             'officialDocument' => false
         ]);
@@ -2386,6 +2395,9 @@ function handle_death_certificate_routes($method, $segments, $body)
         if (($record['status'] ?? '') !== 'awaiting_admin') {
             respond(409, ['error' => 'This record is no longer waiting for review']);
         }
+        if (empty($record['doctorAttested']) || empty($record['doctorAttestedAt'])) {
+            respond(409, ['error' => 'The attending doctor must attest before admin approval']);
+        }
 
         $decision = trim((string)($body['decision'] ?? ''));
         if (!in_array($decision, ['approve', 'reject'], true)) {
@@ -2405,6 +2417,7 @@ function handle_death_certificate_routes($method, $segments, $body)
         ];
         if ($decision === 'approve') {
             $updates['approvedAt'] = gmdate('c');
+            $updates['adminApprovedBy'] = (string)($user['name'] ?? '');
         }
         $updated = update_row('death_certificates', $recordId, $updates);
         respond(200, ['message' => $decision === 'approve' ? 'Hospital record approved for linked family access' : 'Hospital record rejected', 'record' => $updated]);

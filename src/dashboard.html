@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=death-records-20261008">
+    <link rel="stylesheet" href="css/styles.css?v=death-records-dual-confirm-20261008">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=death-records-20261008" defer></script>
+    <script src="js/dashboard.js?v=death-records-dual-confirm-20261008" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -343,6 +343,10 @@
                         <textarea id="doctor-death-cause" rows="3" maxlength="500" required></textarea>
                     </div>
                 </div>
+                <label class="death-record-attestation">
+                    <input id="doctor-death-attestation" type="checkbox" required>
+                    <span>I confirm this record reflects my clinical assessment as the attending doctor.</span>
+                </label>
                 <button class="btn btn-primary" type="submit">Submit for admin review</button>
                 <p id="doctor-death-status" class="form-status" role="status" aria-live="polite"></p>
             </form>
