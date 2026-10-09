@@ -32,7 +32,7 @@ if (($segments[0] ?? '') === 'chat') {
 
 initialize_data_store();
 
-$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests', 'death-certificates'];
+$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests', 'death-certificates', 'medicine-stock', 'notifications', 'audit-logs', 'medical-documents'];
 while (!empty($segments) && !in_array($segments[0], $allowedResources, true)) {
     array_shift($segments);
 }
@@ -75,6 +75,18 @@ switch ($resource) {
         break;
     case 'death-certificates':
         handle_death_certificate_routes($requestMethod, $segments, $body);
+        break;
+    case 'medicine-stock':
+        handle_medicine_stock_routes($requestMethod, $segments, $body);
+        break;
+    case 'notifications':
+        handle_notification_routes($requestMethod, $segments, $body);
+        break;
+    case 'audit-logs':
+        handle_audit_log_routes($requestMethod, $segments, $body);
+        break;
+    case 'medical-documents':
+        handle_medical_document_routes($requestMethod, $segments, $body);
         break;
     default:
         respond(404, ['error' => 'Route not found']);
@@ -376,7 +388,11 @@ function get_collection_table($name)
         'bulletins' => 'collection_bulletins',
         'site_settings' => 'collection_site_settings',
         'clinical_requests' => 'collection_clinical_requests',
-        'death_certificates' => 'collection_death_certificates'
+        'death_certificates' => 'collection_death_certificates',
+        'medicine_stock' => 'collection_medicine_stock',
+        'notifications' => 'collection_notifications',
+        'audit_logs' => 'collection_audit_logs',
+        'medical_documents' => 'collection_medical_documents'
     ];
 
     if (!isset($allowed[$name])) {
@@ -600,6 +616,65 @@ function delete_row($name, $id)
     }
 
     return $stmt->affected_rows > 0;
+}
+
+function audit_event($user, $action, $resource, $resourceId, $metadata = [])
+{
+    $safeMetadata = [];
+    foreach (['patientId', 'appointmentId', 'requestId', 'documentId', 'stockId', 'fromStatus', 'toStatus'] as $key) {
+        if (array_key_exists($key, $metadata)) {
+            $safeMetadata[$key] = $metadata[$key];
+        }
+    }
+
+    return add_row('audit_logs', [
+        'actorId' => (int)($user['id'] ?? 0),
+        'actorName' => (string)($user['name'] ?? 'System'),
+        'actorRole' => (string)($user['role'] ?? 'system'),
+        'action' => substr((string)$action, 0, 80),
+        'resource' => substr((string)$resource, 0, 60),
+        'resourceId' => (int)$resourceId,
+        'metadata' => $safeMetadata,
+        'timestamp' => gmdate('c')
+    ]);
+}
+
+function create_user_notification($userId, $type, $title, $message, $metadata = [])
+{
+    $target = find_by_id('users', (int)$userId);
+    if (!$target) return null;
+
+    return add_row('notifications', [
+        'userId' => (int)$target['id'],
+        'type' => substr((string)$type, 0, 60),
+        'title' => substr((string)$title, 0, 120),
+        'message' => substr((string)$message, 0, 240),
+        'metadata' => $metadata,
+        'readAt' => null,
+        'createdAt' => gmdate('c')
+    ]);
+}
+
+function notify_patient_contacts($patient, $type, $title, $message, $metadata = [])
+{
+    if (!$patient || empty($patient['id'])) return;
+
+    $patientId = (int)$patient['id'];
+    $patientEmail = strtolower(trim((string)($patient['email'] ?? '')));
+    $recipients = [];
+    foreach (read_data('users') as $candidate) {
+        $role = (string)($candidate['role'] ?? '');
+        if (!in_array($role, ['patient', 'family'], true)) continue;
+
+        $linked = $role === 'family' ? find_patient_for_user($candidate) : null;
+        $matchesPatient = ($linked && (int)($linked['id'] ?? 0) === $patientId)
+            || ($role === 'patient' && $patientEmail !== '' && strtolower(trim((string)($candidate['email'] ?? ''))) === $patientEmail);
+        if ($matchesPatient) $recipients[(int)$candidate['id']] = true;
+    }
+
+    foreach (array_keys($recipients) as $recipientId) {
+        create_user_notification($recipientId, $type, $title, $message, array_merge($metadata, ['patientId' => $patientId]));
+    }
 }
 
 function sanitize_user($user)
@@ -1152,6 +1227,8 @@ function handle_patient_routes($method, $segments, $body)
             }
         }
 
+        audit_event($user, 'patient-created', 'patient', $newPatient['id'], ['patientId' => $newPatient['id']]);
+
         respond(201, ['message' => 'Patient created successfully', 'patient' => $newPatient]);
     }
 
@@ -1187,6 +1264,7 @@ function handle_patient_routes($method, $segments, $body)
         $vitals['lastUpdated'] = gmdate('c');
 
         $updatedPatient = update_row('patients', $patientId, ['vitals' => $vitals]);
+        audit_event($user, 'patient-vitals-updated', 'patient', $patientId, ['patientId' => $patientId]);
         respond(200, ['message' => 'Patient vitals updated successfully', 'patient' => $updatedPatient]);
     }
 
@@ -1208,6 +1286,10 @@ function handle_patient_routes($method, $segments, $body)
         }
 
         $updatedPatient = update_row('patients', $patientId, ['severity' => $severity]);
+        audit_event($user, 'patient-severity-updated', 'patient', $patientId, ['patientId' => $patientId]);
+        if (in_array($severity, ['Critical', 'Severe'], true)) {
+            notify_patient_contacts($patient, 'patient-severity-updated', 'Patient status updated', 'The care team updated the linked patient’s severity. Please open the family account for details.');
+        }
         respond(200, ['message' => 'Patient severity updated successfully', 'patient' => $updatedPatient]);
     }
 
@@ -1223,6 +1305,7 @@ function handle_patient_routes($method, $segments, $body)
         }
 
         $updatedPatient = update_row('patients', $patientId, $body);
+        audit_event($user, 'patient-record-updated', 'patient', $patientId, ['patientId' => $patientId]);
         respond(200, ['message' => 'Patient updated successfully', 'patient' => $updatedPatient]);
     }
 
@@ -1246,6 +1329,7 @@ function handle_patient_routes($method, $segments, $body)
             respond(404, ['error' => 'Patient not found']);
         }
 
+        audit_event($user, 'patient-record-deleted', 'patient', $patientId, ['patientId' => $patientId]);
         respond(200, ['message' => 'Patient deleted successfully']);
     }
 
@@ -1532,8 +1616,27 @@ function handle_message_routes($method, $segments, $body)
     respond(404, ['error' => 'Route not found']);
 }
 
+function is_future_appointment_slot($date, $time)
+{
+    if (!valid_iso_date((string)$date) || !preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', (string)$time)) return false;
+    $timezone = new DateTimeZone('Asia/Kuala_Lumpur');
+    $slot = DateTimeImmutable::createFromFormat('!Y-m-d H:i', (string)$date . ' ' . (string)$time, $timezone);
+    return $slot && $slot > new DateTimeImmutable('now', $timezone);
+}
+
 function handle_appointment_routes($method, $segments, $body)
 {
+    if ($method === 'GET' && count($segments) === 2 && $segments[1] === 'me') {
+        $user = require_auth(['patient', 'family', 'doctor', 'staff', 'admin']);
+        $items = array_values(array_filter(read_data('appointments'), function ($appointment) use ($user) {
+            return appointment_belongs_to_user($appointment, $user);
+        }));
+        usort($items, function ($a, $b) {
+            return strcmp(($a['date'] ?? '') . ' ' . ($a['time'] ?? ''), ($b['date'] ?? '') . ' ' . ($b['time'] ?? ''));
+        });
+        respond(200, $items);
+    }
+
     if ($method === 'GET' && count($segments) === 2 && $segments[1] === 'availability') {
         $doctorId = (int)($_GET['doctorId'] ?? 0);
         $date = trim((string)($_GET['date'] ?? ''));
@@ -1603,6 +1706,7 @@ function handle_appointment_routes($method, $segments, $body)
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !preg_match('/^\d{2}:\d{2}$/', $time)) {
             respond(400, ['error' => 'Invalid appointment date or time format']);
         }
+        if (!is_future_appointment_slot($date, $time)) respond(400, ['error' => 'Appointment must be booked for a future date and time']);
 
         $doctor = find_by_id('users', $doctorId);
         if (!$doctor || ($doctor['role'] ?? '') !== 'doctor') {
@@ -1640,6 +1744,19 @@ function handle_appointment_routes($method, $segments, $body)
             'doctorDepartment' => $department,
             'status' => 'Scheduled'
         ]);
+
+        create_user_notification((int)$canonicalDoctor['id'], 'appointment-booked', 'New appointment booked', 'A patient booked an appointment on your schedule.', ['appointmentId' => (int)$newAppointment['id']]);
+        $patientRecord = find_patient_by_email($patientEmail);
+        if ($patientRecord) {
+            notify_patient_contacts($patientRecord, 'appointment-booked', 'Appointment booked', 'Your appointment has been booked.', ['appointmentId' => (int)$newAppointment['id']]);
+        } else {
+            foreach (read_data('users') as $patientUser) {
+                if (($patientUser['role'] ?? '') === 'patient' && strtolower(trim((string)($patientUser['email'] ?? ''))) === strtolower($patientEmail)) {
+                    create_user_notification((int)$patientUser['id'], 'appointment-booked', 'Appointment booked', 'Your appointment has been booked.', ['appointmentId' => (int)$newAppointment['id']]);
+                }
+            }
+        }
+        audit_event(['id' => 0, 'name' => 'Booking portal', 'role' => 'public'], 'appointment-booked', 'appointment', $newAppointment['id'], ['appointmentId' => $newAppointment['id']]);
 
         respond(201, ['message' => 'Appointment booked successfully', 'appointment' => $newAppointment]);
     }
@@ -1705,6 +1822,99 @@ function handle_appointment_routes($method, $segments, $body)
         }
 
         respond(200, ['message' => 'Appointment deleted successfully']);
+    }
+
+    if ($method === 'PUT' && count($segments) === 2 && is_numeric($segments[1])) {
+        $user = require_auth(['patient', 'family', 'doctor', 'staff', 'admin']);
+        $appointmentId = (int)$segments[1];
+        $appointment = find_by_id('appointments', $appointmentId);
+        if (!$appointment) respond(404, ['error' => 'Appointment not found']);
+
+        $action = trim((string)($body['action'] ?? ''));
+        if (in_array($action, ['confirm', 'request-reschedule'], true)) {
+            if (!in_array($user['role'], ['patient', 'family'], true) || !appointment_belongs_to_user($appointment, $user)) {
+                respond(403, ['error' => 'Only the booked patient or their linked family account can confirm or request a reschedule']);
+            }
+            if (in_array(($appointment['status'] ?? ''), ['Cancelled', 'Completed'], true)) {
+                respond(409, ['error' => 'This appointment can no longer be changed']);
+            }
+            if (($appointment['status'] ?? '') === 'Reschedule Requested') {
+                respond(409, ['error' => 'A reschedule request is already waiting for the care team']);
+            }
+
+            if ($action === 'confirm') {
+                if (!is_future_appointment_slot($appointment['date'] ?? '', $appointment['time'] ?? '')) respond(409, ['error' => 'This appointment time has passed']);
+                $updated = update_row('appointments', $appointmentId, [
+                    'status' => 'Confirmed',
+                    'confirmedBy' => (int)$user['id'],
+                    'confirmedAt' => gmdate('c')
+                ]);
+                create_user_notification((int)$appointment['doctorId'], 'appointment-confirmed', 'Appointment confirmed', 'A patient or linked family member confirmed an appointment.', ['appointmentId' => $appointmentId]);
+                audit_event($user, 'appointment-confirmed', 'appointment', $appointmentId, ['appointmentId' => $appointmentId]);
+                respond(200, ['message' => 'Appointment confirmed', 'appointment' => $updated]);
+            }
+
+            $date = trim((string)($body['date'] ?? ''));
+            $time = trim((string)($body['time'] ?? ''));
+            $note = clinical_text($body['note'] ?? '', 240);
+            if (!is_future_appointment_slot($date, $time)) {
+                respond(400, ['error' => 'Choose a valid future date and time']);
+            }
+            if ($note === null) respond(400, ['error' => 'Reschedule note is too long']);
+            $request = ['date' => $date, 'time' => $time, 'note' => $note, 'requestedBy' => (int)$user['id'], 'requestedByName' => (string)($user['name'] ?? ''), 'requestedAt' => gmdate('c'), 'previousStatus' => (string)($appointment['status'] ?? 'Scheduled'), 'status' => 'Pending'];
+            $updated = update_row('appointments', $appointmentId, ['status' => 'Reschedule Requested', 'rescheduleRequest' => $request]);
+            create_user_notification((int)$appointment['doctorId'], 'appointment-reschedule', 'Reschedule request', 'A patient or linked family member requested a new appointment time.', ['appointmentId' => $appointmentId]);
+            foreach (read_data('users') as $staffUser) {
+                if (($staffUser['role'] ?? '') === 'staff') create_user_notification((int)$staffUser['id'], 'appointment-reschedule', 'Reschedule request', 'An appointment needs a reschedule decision.', ['appointmentId' => $appointmentId]);
+            }
+            audit_event($user, 'appointment-reschedule-requested', 'appointment', $appointmentId, ['appointmentId' => $appointmentId]);
+            respond(200, ['message' => 'Reschedule request sent for care-team review', 'appointment' => $updated]);
+        }
+
+        if (in_array($action, ['approve-reschedule', 'reject-reschedule'], true)) {
+            if (!in_array($user['role'], ['doctor', 'staff', 'admin'], true)) respond(403, ['error' => 'Only the care team can review reschedule requests']);
+            if ($user['role'] === 'doctor' && !in_array((int)($appointment['doctorId'] ?? 0), get_doctor_alias_ids((int)$user['id']), true)) {
+                respond(403, ['error' => 'Only the assigned doctor can review this appointment']);
+            }
+            $request = $appointment['rescheduleRequest'] ?? null;
+            if (($appointment['status'] ?? '') !== 'Reschedule Requested' || !is_array($request)) respond(409, ['error' => 'No reschedule request is waiting for review']);
+
+            if ($action === 'reject-reschedule') {
+                $updated = update_row('appointments', $appointmentId, [
+                    'status' => $request['previousStatus'] ?? 'Scheduled',
+                    'rescheduleRequest' => array_merge($request, ['status' => 'Rejected', 'reviewedBy' => (string)($user['name'] ?? ''), 'reviewedAt' => gmdate('c')])
+                ]);
+                $patient = find_patient_by_email((string)($appointment['patientEmail'] ?? ''));
+                notify_patient_contacts($patient, 'appointment-reschedule-rejected', 'Reschedule request not approved', 'Your original appointment time remains scheduled.', ['appointmentId' => $appointmentId]);
+                audit_event($user, 'appointment-reschedule-rejected', 'appointment', $appointmentId, ['appointmentId' => $appointmentId]);
+                respond(200, ['message' => 'Reschedule request rejected; original time remains scheduled', 'appointment' => $updated]);
+            }
+
+            $newDate = (string)($request['date'] ?? '');
+            $newTime = (string)($request['time'] ?? '');
+            $doctor = find_by_id('users', (int)($appointment['doctorId'] ?? 0));
+            if (!is_future_appointment_slot($newDate, $newTime) || !is_doctor_schedule_valid($newDate, $newTime, $doctor['department'] ?? 'General Medicine') || find_approved_doctor_leave((int)$appointment['doctorId'], $newDate)) {
+                respond(409, ['error' => 'The requested time is outside the doctor schedule or on approved leave']);
+            }
+            foreach (read_data('appointments') as $other) {
+                if ((int)($other['id'] ?? 0) !== $appointmentId && (int)($other['doctorId'] ?? 0) === (int)$appointment['doctorId'] && ($other['date'] ?? '') === $newDate && ($other['time'] ?? '') === $newTime && ($other['status'] ?? '') !== 'Cancelled') {
+                    respond(409, ['error' => 'Doctor already has an appointment at that time']);
+                }
+            }
+
+            $updated = update_row('appointments', $appointmentId, [
+                'date' => $newDate,
+                'time' => $newTime,
+                'status' => 'Confirmed',
+                'rescheduleRequest' => array_merge($request, ['status' => 'Approved', 'reviewedBy' => (string)($user['name'] ?? ''), 'reviewedAt' => gmdate('c')])
+            ]);
+            $patient = find_patient_by_email((string)($appointment['patientEmail'] ?? ''));
+            notify_patient_contacts($patient, 'appointment-rescheduled', 'Appointment rescheduled', 'The care team approved a new appointment time.', ['appointmentId' => $appointmentId]);
+            audit_event($user, 'appointment-reschedule-approved', 'appointment', $appointmentId, ['appointmentId' => $appointmentId]);
+            respond(200, ['message' => 'Reschedule approved', 'appointment' => $updated]);
+        }
+
+        respond(400, ['error' => 'Unsupported appointment action']);
     }
 
     respond(404, ['error' => 'Route not found']);
@@ -1907,12 +2117,16 @@ function clinical_clean_medicine($input)
         return null;
     }
 
+    $quantity = filter_var($input['quantity'] ?? 1, FILTER_VALIDATE_INT);
+    if ($quantity === false || $quantity < 1 || $quantity > 10000) return null;
+
     $medicine = [
         'name' => clinical_text($input['name'] ?? '', 120, true),
         'dose' => clinical_text($input['dose'] ?? '', 60, true),
         'frequency' => clinical_text($input['frequency'] ?? '', 80, true),
         'duration' => clinical_text($input['duration'] ?? '', 60),
-        'instructions' => clinical_text($input['instructions'] ?? '', 300)
+        'instructions' => clinical_text($input['instructions'] ?? '', 300),
+        'quantity' => $quantity
     ];
 
     return in_array(null, $medicine, true) ? null : $medicine;
@@ -2036,7 +2250,7 @@ function handle_clinical_request_routes($method, $segments, $body)
                     return true;
                 }
 
-                return ($item['type'] ?? '') === 'family-medicine-request'
+                return !empty($item['familyRequest'])
                     && (int)($item['familyRequest']['requesterId'] ?? 0) === $familyUserId
                     && in_array(($item['status'] ?? ''), ['awaiting_doctor', 'awaiting_nurse', 'rejected'], true);
             });
@@ -2092,6 +2306,8 @@ function handle_clinical_request_routes($method, $segments, $body)
                 'history' => [clinical_history_entry($user, 'family-requested-medicine')]
             ];
             $saved = add_row('clinical_requests', $record);
+            create_user_notification($doctorId, 'family-medicine-request', 'Family medicine request', 'A linked family member requested a medicine review.', ['patientId' => (int)$patient['id'], 'requestId' => (int)$saved['id']]);
+            audit_event($user, 'family-medicine-requested', 'clinical-request', $saved['id'], ['patientId' => $patient['id'], 'requestId' => $saved['id']]);
             respond(201, ['message' => 'Request sent to the patient’s assigned doctor', 'requestId' => (int)$saved['id']]);
         }
 
@@ -2141,6 +2357,13 @@ function handle_clinical_request_routes($method, $segments, $body)
 
         $record['history'] = [clinical_history_entry($user, 'submitted')];
         $saved = add_row('clinical_requests', $record);
+        audit_event($user, 'clinical-request-submitted', 'clinical-request', $saved['id'], ['patientId' => $patient['id'], 'requestId' => $saved['id']]);
+        create_user_notification((int)$user['id'], 'clinical-request-submitted', 'Clinical request submitted', 'Your request is waiting for the nursing team.', ['requestId' => (int)$saved['id'], 'patientId' => (int)$patient['id']]);
+        foreach (read_data('users') as $staffUser) {
+            if (($staffUser['role'] ?? '') === 'staff') {
+                create_user_notification((int)$staffUser['id'], 'clinical-review-needed', 'Clinical review needed', 'A doctor submitted an item for nursing review.', ['requestId' => (int)$saved['id'], 'patientId' => (int)$patient['id']]);
+            }
+        }
         respond(201, ['message' => 'Submitted for nurse review', 'request' => $saved]);
     }
 
@@ -2162,14 +2385,55 @@ function handle_clinical_request_routes($method, $segments, $body)
         $history = $item['history'] ?? [];
 
         if ($decision === 'approve') {
+            $stock = null;
+            $needed = 0;
+            if (($item['type'] ?? '') === 'medicine') {
+                $stock = find_medicine_stock($item['medicine']['name'] ?? '');
+                $needed = (int)($item['medicine']['quantity'] ?? 1);
+                if (!$stock) {
+                    respond(409, ['error' => 'Insufficient stock. Use “Out of stock / change” and send a replacement to the doctor.']);
+                }
+            }
+
             $history[] = clinical_history_entry($user, 'nurse-approved');
-            $updated = update_row('clinical_requests', $requestId, [
-                'status' => 'approved',
-                'nurseId' => (int)$user['id'],
-                'nurseName' => (string)($user['name'] ?? ''),
-                'approvedAt' => gmdate('c'),
-                'history' => $history
-            ]);
+            $db = get_db();
+            $db->begin_transaction();
+            try {
+                if ($stock) {
+                    $stockId = (int)$stock['id'];
+                    $stockTable = get_collection_table('medicine_stock');
+                    $stockQuery = $db->prepare("SELECT payload FROM `{$stockTable}` WHERE id = ? FOR UPDATE");
+                    if (!$stockQuery) throw new Exception('Unable to lock stock row');
+                    $stockQuery->bind_param('i', $stockId);
+                    if (!$stockQuery->execute()) throw new Exception('Unable to lock stock row');
+                    $lockedRow = $stockQuery->get_result()->fetch_assoc();
+                    $lockedStock = $lockedRow ? json_decode($lockedRow['payload'], true) : null;
+                    if (!is_array($lockedStock) || (int)($lockedStock['quantity'] ?? 0) < $needed) {
+                        $db->rollback();
+                        respond(409, ['error' => 'Insufficient stock. Use “Out of stock / change” and send a replacement to the doctor.']);
+                    }
+                    update_row('medicine_stock', $stockId, [
+                        'quantity' => (int)$lockedStock['quantity'] - $needed,
+                        'updatedBy' => (int)$user['id']
+                    ]);
+                }
+
+                $updated = update_row('clinical_requests', $requestId, [
+                    'status' => 'approved',
+                    'nurseId' => (int)$user['id'],
+                    'nurseName' => (string)($user['name'] ?? ''),
+                    'approvedAt' => gmdate('c'),
+                    'history' => $history
+                ]);
+                $db->commit();
+            } catch (Throwable $error) {
+                $db->rollback();
+                error_log('Clinical approval transaction failed: ' . $error->getMessage());
+                respond(500, ['error' => 'Unable to approve this request; no stock was changed']);
+            }
+            if ($stock) audit_event($user, 'medicine-stock-deducted', 'medicine-stock', $stock['id'], ['patientId' => $item['patientId'] ?? 0, 'requestId' => $requestId, 'stockId' => $stock['id']]);
+            audit_event($user, 'clinical-request-approved', 'clinical-request', $requestId, ['patientId' => $item['patientId'] ?? 0, 'requestId' => $requestId]);
+            notify_patient_contacts(find_by_id('patients', (int)($item['patientId'] ?? 0)), 'clinical-request-approved', 'Clinical update approved', 'An approved medicine request or blood result is available in the family account.', ['requestId' => $requestId]);
             respond(200, ['message' => 'Approved and released to the family account', 'request' => $updated]);
         }
 
@@ -2199,6 +2463,8 @@ function handle_clinical_request_routes($method, $segments, $body)
                 'nurseChange' => $change,
                 'history' => $history
             ]);
+            audit_event($user, 'clinical-request-change-proposed', 'clinical-request', $requestId, ['patientId' => $item['patientId'] ?? 0, 'requestId' => $requestId]);
+            if (!empty($item['doctorId'])) create_user_notification((int)$item['doctorId'], 'clinical-change-needs-doctor', 'Doctor approval needed', 'Nursing proposed a change to a clinical request.', ['requestId' => $requestId, 'patientId' => (int)($item['patientId'] ?? 0)]);
             respond(200, ['message' => 'Sent to the doctor for approval', 'request' => $updated]);
         }
 
@@ -2239,6 +2505,12 @@ function handle_clinical_request_routes($method, $segments, $body)
                     'status' => 'awaiting_nurse',
                     'history' => $history
                 ]);
+                audit_event($user, 'family-medicine-request-prescribed', 'clinical-request', $requestId, ['patientId' => $item['patientId'] ?? 0, 'requestId' => $requestId]);
+                $requesterId = (int)($item['familyRequest']['requesterId'] ?? 0);
+                if ($requesterId > 0) create_user_notification($requesterId, 'family-medicine-prescribed', 'Doctor reviewed medicine request', 'The doctor prescribed the requested medicine. It is now waiting for nurse approval.', ['patientId' => (int)($item['patientId'] ?? 0), 'requestId' => $requestId]);
+                foreach (read_data('users') as $staffUser) {
+                    if (($staffUser['role'] ?? '') === 'staff') create_user_notification((int)$staffUser['id'], 'clinical-review-needed', 'Clinical review needed', 'A doctor prescribed a medicine requested by a family member.', ['requestId' => $requestId, 'patientId' => (int)($item['patientId'] ?? 0)]);
+                }
                 respond(200, ['message' => 'Prescribed request sent to the nurse for second approval', 'request' => $updated]);
             }
 
@@ -2257,6 +2529,8 @@ function handle_clinical_request_routes($method, $segments, $body)
             $history[] = clinical_history_entry($user, 'doctor-approved-change');
             $updates['history'] = $history;
             $updated = update_row('clinical_requests', $requestId, $updates);
+            audit_event($user, 'clinical-request-change-approved', 'clinical-request', $requestId, ['patientId' => $item['patientId'] ?? 0, 'requestId' => $requestId]);
+            notify_patient_contacts(find_by_id('patients', (int)($item['patientId'] ?? 0)), 'clinical-request-approved', 'Clinical update approved', 'An approved medicine request or blood result is available in the family account.', ['requestId' => $requestId]);
             respond(200, ['message' => 'Change approved and released to the family account', 'request' => $updated]);
         }
 
@@ -2267,6 +2541,9 @@ function handle_clinical_request_routes($method, $segments, $body)
                 'rejectedAt' => gmdate('c'),
                 'history' => $history
             ]);
+            audit_event($user, 'clinical-request-change-rejected', 'clinical-request', $requestId, ['patientId' => $item['patientId'] ?? 0, 'requestId' => $requestId]);
+            $requesterId = (int)($item['familyRequest']['requesterId'] ?? 0);
+            if ($requesterId > 0) create_user_notification($requesterId, 'family-medicine-rejected', 'Medicine request not approved', 'The doctor could not approve the medicine request. Contact the care team for follow-up.', ['patientId' => (int)($item['patientId'] ?? 0), 'requestId' => $requestId]);
             respond(200, ['message' => 'Request rejected', 'request' => $updated]);
         }
 
@@ -2385,6 +2662,10 @@ function handle_death_certificate_routes($method, $segments, $body)
         ]);
         $certificateNumber = sprintf('HDC-%s-%05d', substr($deathDate, 0, 4), (int)$record['id']);
         $record = update_row('death_certificates', (int)$record['id'], ['certificateNumber' => $certificateNumber]);
+        audit_event($user, 'death-record-submitted', 'death-certificate', $record['id'], ['patientId' => $patient['id']]);
+        foreach (read_data('users') as $adminUser) {
+            if (($adminUser['role'] ?? '') === 'admin') create_user_notification((int)$adminUser['id'], 'death-record-review', 'Death record needs review', 'A doctor submitted an attested hospital record for admin review.', ['patientId' => (int)$patient['id'], 'requestId' => (int)$record['id']]);
+        }
         respond(201, ['message' => 'Hospital record submitted for admin review', 'record' => $record]);
     }
 
@@ -2426,9 +2707,248 @@ function handle_death_certificate_routes($method, $segments, $body)
             $updates['adminApprovedBy'] = (string)($user['name'] ?? '');
         }
         $updated = update_row('death_certificates', $recordId, $updates);
+        audit_event($user, $decision === 'approve' ? 'death-record-approved' : 'death-record-rejected', 'death-certificate', $recordId, ['patientId' => $record['patientId'] ?? 0]);
+        if ($decision === 'approve') {
+            notify_patient_contacts(find_by_id('patients', (int)($record['patientId'] ?? 0)), 'death-record-approved', 'Hospital record approved', 'A hospital record copy is available in the linked family account.', ['requestId' => $recordId]);
+        } else {
+            $doctor = find_by_id('users', (int)($record['doctorId'] ?? 0));
+            if ($doctor) create_user_notification((int)$doctor['id'], 'death-record-rejected', 'Hospital record needs correction', 'Admin rejected a hospital record. Review the admin note in Death Records.', ['requestId' => $recordId]);
+        }
         respond(200, ['message' => $decision === 'approve' ? 'Hospital record approved for linked family access' : 'Hospital record rejected', 'record' => $updated]);
     }
 
+    respond(404, ['error' => 'Route not found']);
+}
+
+function normalize_medicine_name($value)
+{
+    return strtolower(preg_replace('/\s+/', ' ', trim((string)$value)));
+}
+
+function find_medicine_stock($name)
+{
+    $key = normalize_medicine_name($name);
+    foreach (read_data('medicine_stock') as $item) {
+        if (normalize_medicine_name($item['name'] ?? '') === $key) return $item;
+    }
+    return null;
+}
+
+function handle_medicine_stock_routes($method, $segments, $body)
+{
+    $user = require_auth(['admin', 'staff', 'doctor']);
+    if ($method === 'GET' && count($segments) === 1) {
+        $items = read_data('medicine_stock');
+        usort($items, function ($a, $b) { return strcasecmp((string)($a['name'] ?? ''), (string)($b['name'] ?? '')); });
+        respond(200, $items);
+    }
+
+    if (!in_array($user['role'], ['admin', 'staff'], true)) {
+        respond(403, ['error' => 'Only pharmacy staff or admins can change medicine stock']);
+    }
+
+    if ($method === 'POST' && count($segments) === 1) {
+        $name = clinical_text($body['name'] ?? '', 120, true);
+        $unit = clinical_text($body['unit'] ?? '', 40, true);
+        $quantity = filter_var($body['quantity'] ?? null, FILTER_VALIDATE_INT);
+        $minimum = filter_var($body['minimum'] ?? 0, FILTER_VALIDATE_INT);
+        if ($name === null || $unit === null || $quantity === false || $quantity < 0 || $quantity > 100000 || $minimum === false || $minimum < 0 || $minimum > 100000) {
+            respond(400, ['error' => 'Enter a medicine, unit and valid stock/minimum quantities']);
+        }
+        if (find_medicine_stock($name)) respond(409, ['error' => 'This medicine is already in the stock list']);
+        $item = add_row('medicine_stock', ['name' => $name, 'unit' => $unit, 'quantity' => $quantity, 'minimum' => $minimum, 'updatedBy' => (int)$user['id']]);
+        audit_event($user, 'stock-created', 'medicine-stock', $item['id'], ['stockId' => $item['id']]);
+        respond(201, ['message' => 'Medicine added to stock', 'item' => $item]);
+    }
+
+    if ($method === 'PUT' && count($segments) === 2 && is_numeric($segments[1])) {
+        $item = find_by_id('medicine_stock', (int)$segments[1]);
+        if (!$item) respond(404, ['error' => 'Medicine not found']);
+        $quantity = filter_var($body['quantity'] ?? null, FILTER_VALIDATE_INT);
+        $minimum = filter_var($body['minimum'] ?? ($item['minimum'] ?? 0), FILTER_VALIDATE_INT);
+        if ($quantity === false || $quantity < 0 || $quantity > 100000 || $minimum === false || $minimum < 0 || $minimum > 100000) {
+            respond(400, ['error' => 'Stock quantities must be whole numbers from 0 to 100,000']);
+        }
+        $updated = update_row('medicine_stock', (int)$item['id'], ['quantity' => $quantity, 'minimum' => $minimum, 'updatedBy' => (int)$user['id']]);
+        audit_event($user, 'stock-adjusted', 'medicine-stock', $item['id'], ['stockId' => $item['id']]);
+        respond(200, ['message' => 'Medicine stock updated', 'item' => $updated]);
+    }
+
+    respond(404, ['error' => 'Route not found']);
+}
+
+function appointment_belongs_to_user($appointment, $user)
+{
+    if (($user['role'] ?? '') === 'admin' || ($user['role'] ?? '') === 'staff') return true;
+    if (($user['role'] ?? '') === 'doctor') {
+        return in_array((int)($appointment['doctorId'] ?? 0), get_doctor_alias_ids((int)$user['id']), true);
+    }
+    if (($user['role'] ?? '') === 'patient') {
+        return strtolower(trim((string)($appointment['patientEmail'] ?? ''))) === strtolower(trim((string)($user['email'] ?? '')));
+    }
+    if (($user['role'] ?? '') === 'family') {
+        $patient = find_patient_for_user($user);
+        return $patient && strtolower(trim((string)($appointment['patientEmail'] ?? ''))) === strtolower(trim((string)($patient['email'] ?? '')));
+    }
+    return false;
+}
+
+function find_patient_by_email($email)
+{
+    $email = strtolower(trim((string)$email));
+    if ($email === '') return null;
+    foreach (read_data('patients') as $patient) {
+        if (strtolower(trim((string)($patient['email'] ?? ''))) === $email) return $patient;
+    }
+    return null;
+}
+
+function handle_notification_routes($method, $segments, $body)
+{
+    $user = require_auth(['admin', 'staff', 'doctor', 'patient', 'family']);
+
+    if ($method === 'GET' && count($segments) === 1) {
+        $appointments = read_data('appointments');
+        $notifications = read_data('notifications');
+        $timezone = new DateTimeZone('Asia/Kuala_Lumpur');
+        foreach ($appointments as $appointment) {
+            if (in_array($user['role'], ['admin', 'staff'], true)) continue;
+            if (!appointment_belongs_to_user($appointment, $user) || in_array(($appointment['status'] ?? ''), ['Cancelled', 'Reschedule Requested'], true)) continue;
+            $when = DateTimeImmutable::createFromFormat('!Y-m-d H:i', (string)($appointment['date'] ?? '') . ' ' . (string)($appointment['time'] ?? ''), $timezone);
+            if (!$when) continue;
+            $seconds = $when->getTimestamp() - time();
+            if ($seconds < 0 || $seconds > 86400) continue;
+            $exists = false;
+            foreach ($notifications as $notification) {
+                if ((int)($notification['userId'] ?? 0) === (int)$user['id']
+                    && ($notification['type'] ?? '') === 'appointment-reminder'
+                    && (int)($notification['metadata']['appointmentId'] ?? 0) === (int)$appointment['id']) {
+                    $exists = true;
+                    break;
+                }
+            }
+            if (!$exists) {
+                $created = create_user_notification((int)$user['id'], 'appointment-reminder', 'Upcoming appointment', 'You have an appointment within the next 24 hours.', ['appointmentId' => (int)$appointment['id']]);
+                if ($created) $notifications[] = $created;
+            }
+        }
+
+        $items = array_values(array_filter($notifications, function ($item) use ($user) {
+            return (int)($item['userId'] ?? 0) === (int)$user['id'];
+        }));
+        usort($items, function ($a, $b) { return strtotime($b['createdAt'] ?? '') <=> strtotime($a['createdAt'] ?? ''); });
+        respond(200, array_slice($items, 0, 100));
+    }
+
+    if ($method === 'PUT' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'read') {
+        $item = find_by_id('notifications', (int)$segments[1]);
+        if (!$item || (int)($item['userId'] ?? 0) !== (int)$user['id']) respond(404, ['error' => 'Notification not found']);
+        $updated = update_row('notifications', (int)$item['id'], ['readAt' => gmdate('c')]);
+        respond(200, ['message' => 'Notification marked as read', 'notification' => $updated]);
+    }
+    respond(404, ['error' => 'Route not found']);
+}
+
+function handle_audit_log_routes($method, $segments, $body)
+{
+    require_auth(['admin']);
+    if ($method !== 'GET' || count($segments) !== 1) respond(405, ['error' => 'Method not allowed']);
+    $items = read_data('audit_logs');
+    usort($items, function ($a, $b) { return strtotime($b['timestamp'] ?? '') <=> strtotime($a['timestamp'] ?? ''); });
+    respond(200, array_slice($items, 0, 300));
+}
+
+function user_can_access_patient($user, $patient)
+{
+    $role = (string)($user['role'] ?? '');
+    if (in_array($role, ['admin', 'staff'], true)) return true;
+    if ($role === 'doctor') return in_array((int)($patient['assignedDoctor'] ?? 0), get_doctor_alias_ids((int)$user['id']), true);
+    if ($role === 'patient') return (int)($user['linkedPatientId'] ?? 0) === (int)$patient['id']
+        || strtolower(trim((string)($user['email'] ?? ''))) === strtolower(trim((string)($patient['email'] ?? '')));
+    if ($role === 'family') {
+        $linked = find_patient_for_user($user);
+        return $linked && (int)$linked['id'] === (int)$patient['id'];
+    }
+    return false;
+}
+
+function medical_document_summary($document)
+{
+    unset($document['data']);
+    return $document;
+}
+
+function handle_medical_document_routes($method, $segments, $body)
+{
+    $user = require_auth(['admin', 'staff', 'doctor', 'family', 'patient']);
+    if ($method === 'GET' && count($segments) === 1) {
+        $patientId = isset($_GET['patientId']) ? (int)$_GET['patientId'] : 0;
+        $records = read_data('medical_documents');
+        $records = array_values(array_filter($records, function ($document) use ($user, $patientId) {
+            $patient = find_by_id('patients', (int)($document['patientId'] ?? 0));
+            return $patient && user_can_access_patient($user, $patient)
+                && ($patientId === 0 || (int)$patient['id'] === $patientId);
+        }));
+        usort($records, function ($a, $b) { return strtotime($b['createdAt'] ?? '') <=> strtotime($a['createdAt'] ?? ''); });
+        respond(200, array_map('medical_document_summary', $records));
+    }
+
+    if ($method === 'POST' && count($segments) === 1) {
+        if (!in_array($user['role'], ['admin', 'staff', 'doctor'], true)) respond(403, ['error' => 'Only care team members can upload medical documents']);
+        $patient = find_by_id('patients', (int)($body['patientId'] ?? 0));
+        if (!$patient) respond(404, ['error' => 'Patient not found']);
+        if (!user_can_access_patient($user, $patient)) respond(403, ['error' => 'You cannot upload documents for this patient']);
+
+        $data = trim((string)($body['data'] ?? ''));
+        if (strpos($data, 'base64,') !== false) $data = substr($data, strpos($data, 'base64,') + 7);
+        $binary = base64_decode($data, true);
+        if ($binary === false || strlen($binary) === 0 || strlen($binary) > 4 * 1024 * 1024) {
+            respond(400, ['error' => 'File must be a non-empty PDF, JPG or PNG no larger than 4 MB']);
+        }
+
+        $mime = '';
+        if (substr($binary, 0, 5) === '%PDF-') $mime = 'application/pdf';
+        elseif (substr($binary, 0, 8) === "\x89PNG\r\n\x1a\n") $mime = 'image/png';
+        elseif (substr($binary, 0, 3) === "\xff\xd8\xff") $mime = 'image/jpeg';
+        if ($mime === '') respond(400, ['error' => 'Only PDF, JPG and PNG files are accepted']);
+
+        $name = clinical_text(basename((string)($body['name'] ?? 'medical-record')), 120, true);
+        $category = clinical_text($body['category'] ?? 'Other', 60, true);
+        if ($name === null || $category === null) respond(400, ['error' => 'File name and category are required']);
+        $document = add_row('medical_documents', [
+            'patientId' => (int)$patient['id'],
+            'patientName' => (string)($patient['name'] ?? ''),
+            'patientCode' => (string)($patient['patientCode'] ?? ''),
+            'name' => preg_replace('/[\x00-\x1F\\\/]+/', '-', $name),
+            'category' => $category,
+            'mime' => $mime,
+            'size' => strlen($binary),
+            'data' => base64_encode($binary),
+            'uploadedBy' => (int)$user['id'],
+            'uploadedByName' => (string)($user['name'] ?? '')
+        ]);
+        audit_event($user, 'medical-document-uploaded', 'medical-document', $document['id'], ['patientId' => $patient['id'], 'documentId' => $document['id']]);
+        respond(201, ['message' => 'Medical document uploaded', 'document' => medical_document_summary($document)]);
+    }
+
+    if ($method === 'GET' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'download') {
+        $document = find_by_id('medical_documents', (int)$segments[1]);
+        if (!$document) respond(404, ['error' => 'Medical document not found']);
+        $patient = find_by_id('patients', (int)($document['patientId'] ?? 0));
+        if (!$patient || !user_can_access_patient($user, $patient)) respond(403, ['error' => 'You cannot access this patient document']);
+
+        $allowedMime = ['application/pdf', 'image/jpeg', 'image/png'];
+        $mime = in_array(($document['mime'] ?? ''), $allowedMime, true) ? $document['mime'] : 'application/octet-stream';
+        $filename = preg_replace('/[^A-Za-z0-9._-]/', '_', (string)($document['name'] ?? 'medical-document'));
+        audit_event($user, 'medical-document-downloaded', 'medical-document', $document['id'], ['patientId' => $patient['id'], 'documentId' => $document['id']]);
+        header('Content-Type: ' . $mime);
+        header('Content-Length: ' . strlen(base64_decode((string)($document['data'] ?? ''), true) ?: ''));
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: private, no-store');
+        header('X-Content-Type-Options: nosniff');
+        echo base64_decode((string)$document['data'], true);
+        exit;
+    }
     respond(404, ['error' => 'Route not found']);
 }
 
@@ -2440,7 +2960,6 @@ function handle_site_status_routes($method, $segments, $body)
         respond(200, [
             'mourningMode' => !empty($current['mourningMode']),
             'memorialName' => (string)($current['memorialName'] ?? ''),
-            'notice' => (string)($current['notice'] ?? ''),
             'updatedAt' => (string)($current['updatedAt'] ?? '')
         ]);
     }
@@ -2605,7 +3124,7 @@ function to_minutes($hhmm)
 
 function initialize_data_store()
 {
-    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates'] as $collection) {
+    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates', 'medicine_stock', 'notifications', 'audit_logs', 'medical_documents'] as $collection) {
         ensure_collection_table($collection);
     }
 

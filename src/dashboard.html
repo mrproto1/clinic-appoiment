@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=death-records-dual-confirm-20261008">
+    <link rel="stylesheet" href="css/styles.css?v=all-clinical-features-20261009">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=death-record-layout-20261008" defer></script>
+    <script src="js/dashboard.js?v=all-clinical-features-20261009" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -112,9 +112,10 @@
                 <kbd>/</kbd>
             </label>
             <div class="dashboard-topbar-actions">
-                <button class="dashboard-alert-button" type="button" onclick="openRoleAlerts()" aria-label="Open priority items" title="Open priority items">
+                <button id="notification-toggle" class="dashboard-alert-button" type="button" onclick="toggleNotifications()" aria-label="Open notifications" title="Open notifications" aria-expanded="false" aria-controls="notification-drawer">
                     <span aria-hidden="true">♧</span>
-                    <i></i>
+                    <i id="notification-unread-dot" hidden></i>
+                    <span id="notification-unread-count" class="notification-unread-count" hidden>0</span>
                 </button>
                 <div class="dashboard-date" id="dashboard-date"></div>
             </div>
@@ -122,6 +123,13 @@
 
         <!-- NOTIFICATIONS -->
         <div id="notifications-container"></div>
+        <aside id="notification-drawer" class="notification-drawer" hidden aria-label="Notifications">
+            <div class="notification-drawer-heading">
+                <h2>Notifications</h2>
+                <button type="button" onclick="toggleNotifications(false)" aria-label="Close notifications">×</button>
+            </div>
+            <div id="notification-list" class="notification-list"></div>
+        </aside>
 
         <section class="dashboard-hero">
             <div class="hero-card">
@@ -204,6 +212,10 @@
                 <div id="doctor-appointments-list"></div>
                 <div id="doctor-appointment-calendar" class="doctor-calendar"></div>
             </div>
+            <div class="card">
+                <h3>Reschedule requests</h3>
+                <div id="doctor-appointment-reschedules" class="appointment-action-list"></div>
+            </div>
         </div>
 
         <div id="doctor-leave-section" class="content-section">
@@ -246,6 +258,10 @@
                 <p class="muted-text">A nurse proposed a change. Approve or reject it before anything reaches the family account.</p>
                 <div id="doctor-clinical-attention-list" class="clinical-list"></div>
             </section>
+            <section class="card doctor-stock-overview">
+                <h3>Pharmacy stock</h3>
+                <div id="doctor-medicine-stock" class="medicine-stock-list"></div>
+            </section>
 
             <div class="clinical-form-grid">
                 <form id="clinical-medicine-form" class="card clinical-form" autocomplete="off">
@@ -271,6 +287,10 @@
                         <div class="form-group">
                             <label for="clinical-medicine-duration">Duration</label>
                             <input id="clinical-medicine-duration" type="text" maxlength="60" placeholder="e.g. 5 days">
+                        </div>
+                        <div class="form-group">
+                            <label for="clinical-medicine-quantity">Stock units</label>
+                            <input id="clinical-medicine-quantity" type="number" min="1" max="10000" step="1" value="1" required>
                         </div>
                     </div>
                     <div class="form-group">
@@ -311,6 +331,10 @@
             <div class="card">
                 <h3>My requests and results</h3>
                 <div id="doctor-clinical-list" class="clinical-list"></div>
+            </div>
+            <div class="card">
+                <h3>Medical documents</h3>
+                <div id="doctor-medical-document-list" class="medical-document-list"></div>
             </div>
         </div>
 
@@ -512,6 +536,43 @@
                 <h3>Recent</h3>
                 <div id="staff-clinical-recent" class="clinical-list"></div>
             </div>
+            <div class="card">
+                <h3>Appointment reschedule requests</h3>
+                <div id="staff-appointment-reschedules" class="appointment-action-list"></div>
+            </div>
+            <div class="card">
+                <h3>Pharmacy stock</h3>
+                <form id="medicine-stock-form" class="medicine-stock-form">
+                    <div class="clinical-field-row">
+                        <input id="medicine-stock-name" type="text" maxlength="120" placeholder="Medicine name" aria-label="Medicine name" required>
+                        <input id="medicine-stock-unit" type="text" maxlength="40" placeholder="Unit (e.g. tablet)" aria-label="Stock unit" required>
+                        <input id="medicine-stock-quantity" type="number" min="0" max="100000" step="1" placeholder="In stock" aria-label="Current stock" required>
+                        <input id="medicine-stock-minimum" type="number" min="0" max="100000" step="1" placeholder="Low-stock alert at" aria-label="Low stock threshold" required>
+                    </div>
+                    <button class="btn btn-primary btn-small" type="submit">Add medicine</button>
+                    <p id="medicine-stock-status" class="form-status" role="status" aria-live="polite"></p>
+                </form>
+                <div id="medicine-stock-list" class="medicine-stock-list"></div>
+            </div>
+            <div class="card">
+                <h3>Medical attachments</h3>
+                <form id="medical-document-form" class="medical-document-form">
+                    <div class="clinical-field-row">
+                        <select id="medical-document-patient" required aria-label="Patient"></select>
+                        <select id="medical-document-category" aria-label="Document category">
+                            <option>Blood result</option>
+                            <option>Discharge summary</option>
+                            <option>Prescription</option>
+                            <option>Other</option>
+                        </select>
+                        <input id="medical-document-file" type="file" accept="application/pdf,image/jpeg,image/png" required aria-label="PDF, JPG or PNG up to 4 MB">
+                    </div>
+                    <button class="btn btn-primary btn-small" type="submit">Upload private record</button>
+                    <p class="muted-text">PDF/JPG/PNG, maximum 4 MB. Only authorized care-team members and linked patient/family accounts can access it.</p>
+                    <p id="medical-document-status" class="form-status" role="status" aria-live="polite"></p>
+                </form>
+                <div id="staff-medical-document-list" class="medical-document-list"></div>
+            </div>
         </div>
 
         <!-- ADMIN DASHBOARD -->
@@ -555,6 +616,10 @@
             <div class="card">
                 <h3>Leave requests awaiting review</h3>
                 <div id="admin-leave-summary"></div>
+            </div>
+            <div class="card">
+                <h3>Recent audit activity</h3>
+                <div id="admin-audit-list" class="audit-log-list"></div>
             </div>
             <div class="card">
                 <h3>All patient records</h3>
@@ -730,6 +795,11 @@
                 <h1>📋 My Health Information</h1>
             </div>
             <div id="patient-content"></div>
+            <section class="card patient-appointments">
+                <h3>Appointments</h3>
+                <p class="muted-text">Confirm an upcoming appointment or request a different time.</p>
+                <div id="patient-appointment-list" class="family-appointment-list"></div>
+            </section>
         </div>
 
         <div id="family-section" class="content-section">
@@ -757,6 +827,17 @@
                     <p id="family-medicine-request-status" class="form-status" role="status" aria-live="polite"></p>
                 </form>
                 <div id="family-clinical-list" class="clinical-list"></div>
+                <div id="family-blood-trends" class="family-blood-trends"></div>
+            </section>
+            <section id="family-appointments" class="card family-appointments">
+                <h3>Appointments</h3>
+                <p class="muted-text">Confirm an upcoming appointment or request a different time.</p>
+                <div id="family-appointment-list" class="family-appointment-list"></div>
+            </section>
+            <section id="family-medical-documents" class="card family-medical-documents">
+                <h3>Medical documents</h3>
+                <p class="muted-text">Private files attached to the linked patient record.</p>
+                <div id="family-medical-document-list" class="medical-document-list"></div>
             </section>
             <section id="family-death-records" class="card family-death-records" aria-labelledby="family-death-title">
                 <h3 id="family-death-title">Hospital death records</h3>

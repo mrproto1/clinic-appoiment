@@ -5614,3 +5614,105 @@ body.dashboard [hidden] {
         margin-bottom: 7px;
     }
 }
+
+.notification-unread-count {
+    position: absolute;
+    top: -5px;
+    right: -6px;
+    display: grid;
+    place-items: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    color: #fff;
+    background: #c14848;
+    border: 1px solid #fff;
+    border-radius: 9px;
+    font-size: 0.62rem;
+    font-weight: 800;
+}
+
+.notification-drawer {
+    position: fixed;
+    z-index: 20;
+    top: 76px;
+    right: 22px;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: min(390px, calc(100vw - 28px));
+    max-height: min(620px, calc(100vh - 96px));
+    padding: 14px;
+    background: #fff;
+    border: 1px solid #dfe6e9;
+    border-radius: 6px;
+    box-shadow: 0 14px 38px rgba(20, 42, 61, 0.18);
+}
+
+.notification-drawer[hidden] { display: none; }
+.notification-drawer-heading { display:flex; align-items:center; justify-content:space-between; padding-bottom:10px; border-bottom:1px solid #e8edef; }
+.notification-drawer-heading h2 { color:#203648; font-size:1rem; }
+.notification-drawer-heading button { width:30px; height:30px; color:#50636f; background:#f5f7f8; border:1px solid #e2e8eb; border-radius:4px; cursor:pointer; font-size:1.1rem; }
+.notification-list { display:grid; gap:7px; padding-top:10px; overflow:auto; }
+.notification-item { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:9px; border:1px solid #e6ebee; border-left:3px solid #3a8882; border-radius:4px; }
+.notification-item.is-read { border-left-color:#c7d0d5; opacity:.75; }
+.notification-item strong { color:#253b4b; font-size:.78rem; }
+.notification-item p { margin:3px 0; color:#536875; font-size:.74rem; }
+.notification-item time { color:#82909a; font-size:.66rem; }
+.notification-mark-read { flex:0 0 auto; padding:5px 7px; color:#306d69; background:#eff7f6; border:1px solid #d6e7e5; border-radius:3px; cursor:pointer; font:inherit; font-size:.66rem; }
+
+.medicine-stock-list,
+.medical-document-list,
+.audit-log-list,
+.appointment-action-list,
+.family-appointment-list { display:grid; gap:8px; }
+.medicine-stock-item,
+.medical-document-item,
+.audit-log-item,
+.family-appointment-card { padding:10px 11px; background:#fff; border:1px solid #e2e8eb; border-radius:4px; }
+.medicine-stock-item { display:flex; align-items:center; justify-content:space-between; gap:14px; }
+.medicine-stock-item.is-low { border-left:3px solid #cf7955; }
+.medicine-stock-details { display:grid; gap:3px; }
+.medicine-stock-details strong { color:#263b4b; font-size:.8rem; }
+.medicine-stock-details span { color:#71818c; font-size:.7rem; }
+.medicine-stock-warning { color:#a44d36; font-size:.68rem; font-weight:800; }
+.medicine-stock-controls { display:flex; align-items:center; gap:6px; }
+.medicine-stock-controls input { width:80px; margin:0; padding:7px; font-size:.75rem; }
+.medicine-stock-form { display:grid; gap:8px; margin-bottom:12px; }
+.medical-document-form { display:grid; gap:8px; margin-bottom:12px; }
+.medical-document-form .clinical-field-row { grid-template-columns:1fr 1fr; }
+.medical-document-item { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.medical-document-item > div { display:grid; gap:3px; min-width:0; }
+.medical-document-item strong { color:#2a4050; font-size:.78rem; overflow-wrap:anywhere; }
+.medical-document-item .muted-text { font-size:.68rem; }
+.audit-log-item { display:grid; grid-template-columns:1fr auto; gap:3px 10px; }
+.audit-log-item strong { color:#31495a; font-size:.74rem; }
+.audit-log-item span { color:#6c7d88; font-size:.68rem; }
+.audit-log-item time { grid-column:2; grid-row:1 / span 2; color:#81909a; font-size:.65rem; text-align:right; }
+
+.family-appointment-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+.family-appointment-heading strong { color:#263b4b; font-size:.8rem; }
+.appointment-reschedule-note { margin-top:7px; padding:7px 9px; color:#765321; background:#fff8e9; border-left:3px solid #c79d4a; font-size:.74rem; }
+.appointment-reschedule-form { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px; padding-top:8px; border-top:1px dashed #dce4e8; }
+.appointment-reschedule-form[hidden] { display:none; }
+.appointment-reschedule-form input { margin:0; padding:8px; font-size:.76rem; }
+.appointment-reschedule-form input[aria-label^="Reason"] { grid-column:1 / -1; }
+.appointment-reschedule-form button { grid-column:1 / -1; justify-self:start; }
+.family-blood-trends { margin-top:14px; }
+.family-blood-trends h4 { margin-bottom:9px; color:#2b4150; font-size:.85rem; }
+.blood-trend-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr)); gap:9px; }
+.blood-trend-card { min-width:0; padding:10px; border:1px solid #e5eaed; border-radius:4px; }
+.blood-trend-card strong { color:#344b5a; font-size:.74rem; }
+.blood-trend-card svg { display:block; width:100%; height:94px; margin:5px 0; overflow:visible; }
+.blood-trend-axis-label { fill:#778792; font:8px Arial,sans-serif; }
+.blood-trend-card .muted-text { font-size:.68rem; }
+.blood-trend-note { margin-top:8px; font-size:.68rem; }
+
+@media (max-width:620px) {
+    .notification-drawer { top:64px; right:10px; }
+    .medicine-stock-item { align-items:flex-start; flex-direction:column; }
+    .medicine-stock-controls { width:100%; }
+    .medicine-stock-controls input { flex:1; width:0; }
+    .medical-document-form .clinical-field-row { grid-template-columns:1fr; }
+    .audit-log-item { grid-template-columns:1fr; }
+    .audit-log-item time { grid-column:1; grid-row:auto; text-align:left; }
+}

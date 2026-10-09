@@ -3,6 +3,7 @@ let ws = null;
 let reconnectAttempts = 0;
 let realtimePollTimer = null;
 let codeBluePollTimer = null;
+let notificationPollTimer = null;
 let currentDoctorChatPatient = null;
 let liveVitalsTimer = null;
 let doctorRealtimeTimer = null;
@@ -17,6 +18,7 @@ let adminBulletinsCache = [];
 let patientVitalsHistory = [];
 let patientVitalsAlertSignature = '';
 let doctorVitalsHistoryByPatient = {};
+let medicineStockCache = [];
 let doctorEcgStateByPatient = {};
 const familyDemoVitalsByPatient = new Map();
 let familyHospitalAlertSignature = '';
@@ -289,6 +291,67 @@ function showNotification(message, type = 'info') {
     setTimeout(() => notification.remove(), 5000);
 }
 
+async function loadUserNotifications() {
+    if (!isLoggedIn() || document.hidden) return;
+    try {
+        const response = await apiCall('/notifications');
+        if (!response || !response.ok) return;
+        const items = await response.json();
+        if (!Array.isArray(items)) return;
+
+        const unread = items.filter((item) => !item.readAt).length;
+        const count = document.getElementById('notification-unread-count');
+        const dot = document.getElementById('notification-unread-dot');
+        if (count) {
+            count.textContent = String(unread);
+            count.hidden = unread === 0;
+        }
+        if (dot) dot.hidden = unread === 0;
+
+        const list = document.getElementById('notification-list');
+        if (!list) return;
+        if (!items.length) {
+            list.replaceChildren(clinicalEl('p', 'muted-text', 'No notifications yet.'));
+            return;
+        }
+        list.replaceChildren(...items.slice(0, 30).map((item) => {
+            const card = clinicalEl('article', `notification-item${item.readAt ? ' is-read' : ' is-unread'}`);
+            const copy = clinicalEl('div');
+            copy.append(clinicalEl('strong', '', item.title || 'Notification'));
+            copy.append(clinicalEl('p', '', item.message || ''));
+            copy.append(clinicalEl('time', '', item.createdAt ? new Date(item.createdAt).toLocaleString() : ''));
+            card.append(copy);
+            if (!item.readAt) {
+                const read = clinicalEl('button', 'notification-mark-read', 'Mark read');
+                read.type = 'button';
+                read.addEventListener('click', () => markNotificationRead(item.id));
+                card.append(read);
+            }
+            return card;
+        }));
+    } catch (error) {
+        console.error('Error loading notifications:', error);
+    }
+}
+
+async function markNotificationRead(notificationId) {
+    try {
+        const response = await apiCall(`/notifications/${notificationId}/read`, { method: 'PUT', body: JSON.stringify({}) });
+        if (response && response.ok) await loadUserNotifications();
+    } catch (error) {
+        console.error('Error marking notification read:', error);
+    }
+}
+
+function toggleNotifications(forceOpen) {
+    const drawer = document.getElementById('notification-drawer');
+    const button = document.getElementById('notification-toggle');
+    if (!drawer) return;
+    drawer.hidden = typeof forceOpen === 'boolean' ? !forceOpen : !drawer.hidden;
+    button?.setAttribute('aria-expanded', String(!drawer.hidden));
+    if (!drawer.hidden) loadUserNotifications();
+}
+
 function normalizeContactName(value) {
     return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
 }
@@ -388,10 +451,14 @@ async function initializeDashboard() {
     // Initialize WebSocket for real-time updates
     initWebSocket();
     await pollCodeBlueAlerts();
+    await loadUserNotifications();
+    if (notificationPollTimer) clearInterval(notificationPollTimer);
+    notificationPollTimer = setInterval(loadUserNotifications, 30000);
 
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
             pollCodeBlueAlerts();
+            loadUserNotifications();
         }
     });
 
@@ -572,6 +639,7 @@ async function loadDoctorDashboard() {
         displayDoctorStats(assignedPatients);
         displayDoctorMessages(messages);
         displayDoctorAppointments(appointments, doctorProfile);
+        loadDoctorAppointmentReschedules(appointments);
         displayDoctorAppointmentCalendar(appointments, 'doctor-appointment-calendar');
         displayDoctorAppointmentCalendar(appointments, 'doctor-main-appointment-calendar');
         displayDoctorLeaves(leaves);
@@ -579,6 +647,8 @@ async function loadDoctorDashboard() {
         startLivePatientTelemetry(assignedPatients);
         loadDoctorClinicalRequests(assignedPatients);
         loadDoctorDeathRecords(assignedPatients);
+        loadMedicineStock('doctor-medicine-stock');
+        loadMedicalDocuments('doctor-medical-document-list');
     } catch (error) {
         console.error('Error loading doctor dashboard:', error);
     }
@@ -1614,6 +1684,10 @@ async function loadStaffDashboard() {
         displayStaffMessages(messages);
         displayStaffAppointments(staffAppointmentCache);
         loadStaffClinicalRequests();
+        loadStaffAppointmentReschedules(staffAppointmentCache);
+        loadMedicineStock('medicine-stock-list', true);
+        populateMedicalDocumentPatients(staffPatientCache, 'medical-document-patient');
+        loadMedicalDocuments('staff-medical-document-list');
 
         if ((!patientsRes || !patientsRes.ok) && appointmentsRes && appointmentsRes.ok) {
             showNotification('Patients API unavailable, showing appointments only.', 'warning');
@@ -1804,6 +1878,7 @@ async function loadAdminDashboard() {
         displayAdminBulletins(bulletins);
         if (siteStatus) displayMourningSettings(siteStatus);
         loadAdminDeathRecords();
+        loadAdminAuditLogs();
     } catch (error) {
         console.error('Error loading admin dashboard:', error);
     }
@@ -2490,9 +2565,15 @@ function buildFamilyMedicineDecisionForm(item) {
         ['dose', 'Dose', 60, ''],
         ['frequency', 'Frequency', 80, ''],
         ['duration', 'Duration', 60, ''],
+        ['quantity', 'Stock units', 5, '1', 'number'],
         ['instructions', 'Instructions', 300, '']
-    ].forEach(([key, label, maxLength, value]) => {
-        const input = clinicalInput('text', label, maxLength, value);
+    ].forEach(([key, label, maxLength, value, type]) => {
+        const input = clinicalInput(type || 'text', label, maxLength, value);
+        if (type === 'number') {
+            input.min = '1';
+            input.max = '10000';
+            input.step = '1';
+        }
         input.required = ['name', 'dose', 'frequency'].includes(key);
         fields[key] = input;
         form.append(input);
@@ -2510,7 +2591,7 @@ function buildFamilyMedicineDecisionForm(item) {
     form.addEventListener('submit', (event) => {
         event.preventDefault();
         decideClinicalRequest(item.id, 'approve', approve, {
-            medicine: Object.fromEntries(Object.entries(fields).map(([key, input]) => [key, input.value.trim()]))
+            medicine: Object.fromEntries(Object.entries(fields).map(([key, input]) => [key, key === 'quantity' ? Number(input.value) : input.value.trim()]))
         });
     });
     return form;
@@ -2590,9 +2671,15 @@ function buildNurseActions(item) {
 function buildNurseChangeForm(item) {
     const form = clinicalEl('form', 'clinical-change-form');
     const fields = {};
-    const addField = (key, label, maxLength, required) => {
-        const input = clinicalInput('text', label, maxLength);
+    const addField = (key, label, maxLength, required, type = 'text') => {
+        const input = clinicalInput(type, label, maxLength);
         input.required = required;
+        if (type === 'number') {
+            input.min = '1';
+            input.max = '10000';
+            input.step = '1';
+            input.value = '1';
+        }
         fields[key] = input;
         form.append(input);
     };
@@ -2602,6 +2689,7 @@ function buildNurseChangeForm(item) {
         addField('dose', 'Dose', 60, true);
         addField('frequency', 'Frequency', 80, true);
         addField('duration', 'Duration', 60, false);
+        addField('quantity', 'Stock units', 5, true, 'number');
     }
     addField('note', item.type === 'medicine' ? 'Reason, e.g. out of stock' : 'What needs correcting', 300, true);
 
@@ -2617,7 +2705,8 @@ function buildNurseChangeForm(item) {
                 name: fields.name.value.trim(),
                 dose: fields.dose.value.trim(),
                 frequency: fields.frequency.value.trim(),
-                duration: fields.duration.value.trim()
+                duration: fields.duration.value.trim(),
+                quantity: Number(fields.quantity.value)
             };
         }
         reviewClinicalRequest(item.id, payload, submit);
@@ -2647,6 +2736,178 @@ async function reviewClinicalRequest(requestId, payload, button) {
     }
 }
 
+function buildAppointmentActionCard(appointment) {
+    const card = clinicalEl('article', 'family-appointment-card');
+    const heading = clinicalEl('div', 'family-appointment-heading');
+    const details = clinicalEl('div');
+    details.append(clinicalEl('strong', '', appointment.doctorName || getDoctorLabel(appointment.doctorId)));
+    details.append(clinicalEl('p', 'muted-text', `${appointment.date || ''} · ${appointment.time || ''} · ${appointment.doctorDepartment || ''}`));
+    heading.append(details, clinicalEl('span', `clinical-status is-${String(appointment.status || 'Scheduled').toLowerCase().replace(/\s+/g, '-')}`, appointment.status || 'Scheduled'));
+    card.append(heading);
+
+    if (appointment.status === 'Reschedule Requested' && appointment.rescheduleRequest) {
+        card.append(clinicalEl('p', 'appointment-reschedule-note', `Requested: ${appointment.rescheduleRequest.date} · ${appointment.rescheduleRequest.time}${appointment.rescheduleRequest.note ? ` — ${appointment.rescheduleRequest.note}` : ''}`));
+    } else if (['Scheduled', 'Confirmed'].includes(appointment.status || 'Scheduled')) {
+        const actions = clinicalEl('div', 'clinical-actions');
+        if (appointment.status !== 'Confirmed') {
+            const confirm = clinicalEl('button', 'btn btn-small btn-success', 'Confirm appointment');
+            confirm.type = 'button';
+            confirm.addEventListener('click', () => submitAppointmentAction(appointment.id, { action: 'confirm' }, confirm));
+            actions.append(confirm);
+        }
+        const request = clinicalEl('button', 'btn btn-small btn-secondary', 'Request reschedule');
+        request.type = 'button';
+        actions.append(request);
+
+        const form = clinicalEl('form', 'appointment-reschedule-form');
+        form.hidden = true;
+        const date = document.createElement('input'); date.type = 'date'; date.required = true; date.min = new Date().toISOString().slice(0, 10); date.setAttribute('aria-label', 'Requested appointment date');
+        const time = document.createElement('input'); time.type = 'time'; time.required = true; time.setAttribute('aria-label', 'Requested appointment time');
+        const note = clinicalInput('text', 'Reason (optional)', 240);
+        const send = clinicalEl('button', 'btn btn-small btn-primary', 'Send request'); send.type = 'submit';
+        form.append(date, time, note, send);
+        request.addEventListener('click', () => { form.hidden = !form.hidden; });
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            submitAppointmentAction(appointment.id, { action: 'request-reschedule', date: date.value, time: time.value, note: note.value.trim() }, send);
+        });
+        card.append(actions, form);
+    }
+    return card;
+}
+
+async function loadFamilyAppointments() {
+    const container = document.getElementById('family-appointment-list');
+    if (!container) return;
+    if (container.contains(document.activeElement)) return;
+    try {
+        const response = await apiCall('/appointments/me');
+        if (!response || !response.ok) {
+            container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Appointment actions are unavailable. Please reload or contact the care team.'));
+            return;
+        }
+        const appointments = await response.json();
+        container.replaceChildren(...(appointments.length
+            ? appointments.map(buildAppointmentActionCard)
+            : [clinicalEl('p', 'muted-text', 'No appointments are linked to this family account.')]));
+    } catch (error) {
+        container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load appointments.'));
+    }
+}
+
+async function loadPatientAppointments() {
+    const container = document.getElementById('patient-appointment-list');
+    if (!container) return;
+    if (container.contains(document.activeElement)) return;
+    try {
+        const response = await apiCall('/appointments/me');
+        if (!response || !response.ok) {
+            container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Appointment actions are unavailable. Please reload or contact the care team.'));
+            return;
+        }
+        const appointments = await response.json();
+        container.replaceChildren(...(appointments.length
+            ? appointments.map(buildAppointmentActionCard)
+            : [clinicalEl('p', 'muted-text', 'No appointments are linked to this patient account.')]));
+    } catch (error) {
+        container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load appointments.'));
+    }
+}
+
+async function submitAppointmentAction(appointmentId, payload, button) {
+    button.disabled = true;
+    try {
+        const response = await apiCall(`/appointments/${appointmentId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to update appointment.', 'danger');
+            return;
+        }
+        showNotification(result.message || 'Appointment updated.', 'success');
+        button.blur();
+        await Promise.all([loadFamilyAppointments(), loadPatientAppointments(), loadUserNotifications()]);
+    } catch (error) {
+        showNotification('Unable to update appointment right now.', 'danger');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function renderAppointmentRescheduleQueue(containerId, appointments) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const pending = appointments.filter((item) => item.status === 'Reschedule Requested' && item.rescheduleRequest?.status === 'Pending');
+    if (!pending.length) {
+        container.replaceChildren(clinicalEl('p', 'muted-text', 'No reschedule requests waiting for review.'));
+        return;
+    }
+
+    container.replaceChildren(...pending.map((appointment) => {
+        const card = clinicalEl('article', 'family-appointment-card');
+        card.append(clinicalEl('strong', '', `${appointment.patientName || 'Patient'} · ${appointment.doctorName || 'Doctor'}`));
+        card.append(clinicalEl('p', 'muted-text', `Current: ${appointment.date} · ${appointment.time}`));
+        card.append(clinicalEl('p', 'appointment-reschedule-note', `Requested: ${appointment.rescheduleRequest.date} · ${appointment.rescheduleRequest.time}${appointment.rescheduleRequest.note ? ` — ${appointment.rescheduleRequest.note}` : ''}`));
+        const actions = clinicalEl('div', 'clinical-actions');
+        const approve = clinicalEl('button', 'btn btn-small btn-success', 'Approve new time');
+        const reject = clinicalEl('button', 'btn btn-small btn-danger', 'Keep original time');
+        approve.type = reject.type = 'button';
+        approve.addEventListener('click', () => reviewAppointmentReschedule(appointment.id, 'approve-reschedule', approve, containerId));
+        reject.addEventListener('click', () => reviewAppointmentReschedule(appointment.id, 'reject-reschedule', reject, containerId));
+        actions.append(approve, reject);
+        card.append(actions);
+        return card;
+    }));
+}
+
+function loadStaffAppointmentReschedules(appointments = staffAppointmentCache) {
+    renderAppointmentRescheduleQueue('staff-appointment-reschedules', appointments || []);
+}
+
+function loadDoctorAppointmentReschedules(appointments = []) {
+    renderAppointmentRescheduleQueue('doctor-appointment-reschedules', appointments || []);
+}
+
+async function reviewAppointmentReschedule(id, action, button, targetId) {
+    button.disabled = true;
+    try {
+        const response = await apiCall(`/appointments/${id}`, { method: 'PUT', body: JSON.stringify({ action }) });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to review reschedule request.', 'danger');
+            return;
+        }
+        showNotification(result.message || 'Reschedule request updated.', 'success');
+        if (targetId === 'doctor-appointment-reschedules') await loadDoctorDashboard();
+        else await loadStaffDashboard();
+    } catch (error) {
+        showNotification('Unable to review reschedule request.', 'danger');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function loadAdminAuditLogs() {
+    const container = document.getElementById('admin-audit-list');
+    if (!container) return;
+    try {
+        const response = await apiCall('/audit-logs');
+        if (!response || !response.ok) {
+            container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Audit log unavailable. Deploy the latest API to Railway.'));
+            return;
+        }
+        const logs = await response.json();
+        container.replaceChildren(...(logs.length ? logs.slice(0, 12).map((entry) => {
+            const row = clinicalEl('article', 'audit-log-item');
+            row.append(clinicalEl('strong', '', entry.action || 'Activity'));
+            row.append(clinicalEl('span', '', `${entry.actorName || 'System'} · ${entry.resource || ''} #${entry.resourceId || ''}`));
+            row.append(clinicalEl('time', '', entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ''));
+            return row;
+        }) : [clinicalEl('p', 'muted-text', 'No audit events recorded yet.')]));
+    } catch (error) {
+        container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load audit activity.'));
+    }
+}
+
 async function loadFamilyClinicalRecords() {
     const list = document.getElementById('family-clinical-list');
     if (!list) return;
@@ -2654,11 +2915,84 @@ async function loadFamilyClinicalRecords() {
     const items = await fetchClinicalRequests();
     if (!items) {
         list.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', clinicalApiUnavailableMessage()));
+        renderFamilyBloodTrends([]);
         return;
     }
     list.replaceChildren(...(items.length
         ? items.map((item) => buildClinicalCard(item, { family: true }))
         : [clinicalEl('p', 'muted-text', 'Nothing has been approved yet.')]));
+    renderFamilyBloodTrends(items);
+}
+
+function renderFamilyBloodTrends(items = []) {
+    const container = document.getElementById('family-blood-trends');
+    if (!container) return;
+
+    const groups = new Map();
+    (items || []).filter((item) => item.type === 'blood-result').forEach((item) => {
+        (item.results || []).forEach((result) => {
+            const value = Number(result.value);
+            if (!Number.isFinite(value)) return;
+            const key = `${String(result.test || '').trim().toLowerCase()}|${String(result.unit || '').trim().toLowerCase()}`;
+            if (!groups.has(key)) groups.set(key, { name: result.test, unit: result.unit || '', points: [] });
+            groups.get(key).points.push({ value, date: item.collectedDate || '' });
+        });
+    });
+
+    const trends = [...groups.values()].filter((group) => group.points.length > 1);
+    if (!trends.length) {
+        container.replaceChildren(clinicalEl('p', 'muted-text', 'Blood trends appear after at least two approved numeric results for the same test.'));
+        return;
+    }
+
+    container.replaceChildren(clinicalEl('h4', '', 'Blood result trends'));
+    const grid = clinicalEl('div', 'blood-trend-grid');
+    trends.forEach((trend) => {
+        trend.points.sort((a, b) => a.date.localeCompare(b.date));
+        const card = clinicalEl('article', 'blood-trend-card');
+        card.append(clinicalEl('strong', '', `${trend.name}${trend.unit ? ` (${trend.unit})` : ''}`));
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 360 112');
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', `${trend.name} results over time`);
+
+        const values = trend.points.map((point) => point.value);
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const span = Math.max(max - min, Math.abs(max) * 0.08, 1);
+        const plotted = trend.points.map((point, index) => ({
+            ...point,
+            x: trend.points.length === 1 ? 180 : 18 + index * (324 / (trend.points.length - 1)),
+            y: 82 - ((point.value - min) / span) * 58
+        }));
+        const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        polyline.setAttribute('points', plotted.map((point) => `${point.x},${point.y}`).join(' '));
+        polyline.setAttribute('fill', 'none');
+        polyline.setAttribute('stroke', '#347c7b');
+        polyline.setAttribute('stroke-width', '3');
+        svg.append(polyline);
+        plotted.forEach((point) => {
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', String(point.x));
+            circle.setAttribute('cy', String(point.y));
+            circle.setAttribute('r', '4');
+            circle.setAttribute('fill', '#347c7b');
+            circle.setAttribute('aria-label', `${point.date}: ${point.value} ${trend.unit}`);
+            svg.append(circle);
+        });
+        const firstDate = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        firstDate.setAttribute('x', '18'); firstDate.setAttribute('y', '104'); firstDate.setAttribute('class', 'blood-trend-axis-label');
+        firstDate.textContent = trend.points[0].date;
+        const lastDate = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        lastDate.setAttribute('x', '342'); lastDate.setAttribute('y', '104'); lastDate.setAttribute('text-anchor', 'end'); lastDate.setAttribute('class', 'blood-trend-axis-label');
+        lastDate.textContent = trend.points[trend.points.length - 1].date;
+        svg.append(firstDate, lastDate);
+        card.append(svg);
+        const latest = trend.points[trend.points.length - 1];
+        card.append(clinicalEl('p', 'muted-text', `Latest: ${latest.value} ${trend.unit} · ${latest.date}`));
+        grid.append(card);
+    });
+    container.append(grid, clinicalEl('p', 'muted-text blood-trend-note', 'Trend view only; a clinician should interpret results with their reference ranges and clinical context.'));
 }
 
 function setupFamilyMedicineRequestForm() {
@@ -3038,6 +3372,231 @@ function setupDeathCertificateForm() {
     });
 }
 
+function renderMedicineStock(targetId, items, editable) {
+    const container = document.getElementById(targetId);
+    if (!container) return;
+    if (!items.length) {
+        container.replaceChildren(clinicalEl('p', 'muted-text', 'No medicines in the stock list yet. Pharmacy staff can add them below.'));
+        return;
+    }
+
+    container.replaceChildren(...items.map((item) => {
+        const row = clinicalEl('article', `medicine-stock-item${Number(item.quantity) <= Number(item.minimum) ? ' is-low' : ''}`);
+        const details = clinicalEl('div', 'medicine-stock-details');
+        details.append(clinicalEl('strong', '', item.name || 'Medicine'));
+        details.append(clinicalEl('span', '', `${item.quantity} ${item.unit || 'units'} · Low stock at ${item.minimum ?? 0}`));
+        if (Number(item.quantity) <= Number(item.minimum)) details.append(clinicalEl('small', 'medicine-stock-warning', 'Low stock'));
+        row.append(details);
+
+        if (editable) {
+            const controls = clinicalEl('div', 'medicine-stock-controls');
+            const quantity = document.createElement('input');
+            quantity.type = 'number'; quantity.min = '0'; quantity.max = '100000'; quantity.step = '1';
+            quantity.value = String(item.quantity ?? 0); quantity.setAttribute('aria-label', `${item.name} stock quantity`);
+            const minimum = document.createElement('input');
+            minimum.type = 'number'; minimum.min = '0'; minimum.max = '100000'; minimum.step = '1';
+            minimum.value = String(item.minimum ?? 0); minimum.setAttribute('aria-label', `${item.name} low-stock threshold`);
+            const save = clinicalEl('button', 'btn btn-small btn-secondary', 'Update');
+            save.type = 'button';
+            save.addEventListener('click', () => updateMedicineStock(item.id, quantity.value, minimum.value, save));
+            controls.append(quantity, minimum, save);
+            row.append(controls);
+        }
+        return row;
+    }));
+}
+
+async function loadMedicineStock(targetId, editable = false) {
+    const container = document.getElementById(targetId);
+    if (!container) return;
+    if (editable && container.contains(document.activeElement)) return;
+    try {
+        const response = await apiCall('/medicine-stock');
+        if (!response || !response.ok) {
+            container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Medicine stock service is not available. Deploy the latest API to Railway.'));
+            return;
+        }
+        medicineStockCache = await response.json();
+        renderMedicineStock(targetId, Array.isArray(medicineStockCache) ? medicineStockCache : [], editable);
+    } catch (error) {
+        console.error('Error loading pharmacy stock:', error);
+        container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load pharmacy stock.'));
+    }
+}
+
+async function updateMedicineStock(id, quantity, minimum, button) {
+    button.disabled = true;
+    try {
+        const response = await apiCall(`/medicine-stock/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ quantity: Number(quantity), minimum: Number(minimum) })
+        });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to update stock.', 'danger');
+            return;
+        }
+        showNotification('Medicine stock updated.', 'success');
+        button.blur();
+        await loadMedicineStock('medicine-stock-list', true);
+        await loadMedicineStock('doctor-medicine-stock', false);
+    } catch (error) {
+        showNotification('Unable to update stock right now.', 'danger');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function setupMedicineStockForm() {
+    const form = document.getElementById('medicine-stock-form');
+    const status = document.getElementById('medicine-stock-status');
+    if (!form || !status) return;
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        try {
+            const response = await apiCall('/medicine-stock', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: document.getElementById('medicine-stock-name').value.trim(),
+                    unit: document.getElementById('medicine-stock-unit').value.trim(),
+                    quantity: Number(document.getElementById('medicine-stock-quantity').value),
+                    minimum: Number(document.getElementById('medicine-stock-minimum').value)
+                })
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok) {
+                status.textContent = result.error || 'Unable to add medicine to stock.';
+                return;
+            }
+            form.reset();
+            status.textContent = 'Medicine added to stock.';
+            await loadMedicineStock('medicine-stock-list', true);
+            await loadMedicineStock('doctor-medicine-stock', false);
+        } catch (error) {
+            status.textContent = 'Unable to update pharmacy stock right now.';
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
+function populateMedicalDocumentPatients(patients, selectId) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const previous = select.value;
+    select.replaceChildren(new Option('-- Select patient --', ''));
+    patients.filter((patient) => patient.status !== 'discharged').forEach((patient) => {
+        select.append(new Option(`${patient.patientCode || 'N/A'} - ${patient.name}`, String(patient.id)));
+    });
+    if (previous && patients.some((patient) => String(patient.id) === previous)) select.value = previous;
+}
+
+async function loadMedicalDocuments(targetId, patientId = 0) {
+    const container = document.getElementById(targetId);
+    if (!container) return;
+    try {
+        const query = patientId > 0 ? `?patientId=${encodeURIComponent(patientId)}` : '';
+        const response = await apiCall(`/medical-documents${query}`);
+        if (!response || !response.ok) {
+            container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Medical document storage is unavailable. Deploy the latest API to Railway.'));
+            return;
+        }
+        const documents = await response.json();
+        if (!Array.isArray(documents) || !documents.length) {
+            container.replaceChildren(clinicalEl('p', 'muted-text', 'No medical documents attached.'));
+            return;
+        }
+        container.replaceChildren(...documents.map((document) => {
+            const item = clinicalEl('article', 'medical-document-item');
+            const summary = clinicalEl('div');
+            summary.append(clinicalEl('strong', '', document.name || 'Medical document'));
+            summary.append(clinicalEl('span', 'muted-text', `${document.category || 'Other'} · ${(Number(document.size || 0) / 1024).toFixed(0)} KB · ${document.uploadedByName || 'Care team'}`));
+            const download = clinicalEl('button', 'btn btn-small btn-secondary', 'Download');
+            download.type = 'button';
+            download.addEventListener('click', () => downloadMedicalDocument(document.id, document.name));
+            item.append(summary, download);
+            return item;
+        }));
+    } catch (error) {
+        console.error('Error loading medical documents:', error);
+        container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load medical documents.'));
+    }
+}
+
+async function downloadMedicalDocument(documentId, filename) {
+    try {
+        const response = await apiCall(`/medical-documents/${documentId}/download`);
+        if (!response || !response.ok) {
+            showNotification('You cannot access this patient document.', 'danger');
+            return;
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = filename || 'medical-document';
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        console.error('Error downloading medical document:', error);
+        showNotification('Unable to download this document.', 'danger');
+    }
+}
+
+function setupMedicalDocumentForm() {
+    const form = document.getElementById('medical-document-form');
+    const status = document.getElementById('medical-document-status');
+    if (!form || !status) return;
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const file = document.getElementById('medical-document-file').files[0];
+        const patientId = Number(document.getElementById('medical-document-patient').value);
+        if (!file || !patientId) return;
+        if (file.size > 4 * 1024 * 1024) {
+            status.textContent = 'Choose a file no larger than 4 MB.';
+            return;
+        }
+
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        status.textContent = 'Uploading private record...';
+        try {
+            const data = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error('Unable to read file'));
+                reader.readAsDataURL(file);
+            });
+            const response = await apiCall('/medical-documents', {
+                method: 'POST',
+                body: JSON.stringify({
+                    patientId,
+                    name: file.name,
+                    category: document.getElementById('medical-document-category').value,
+                    data
+                })
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok) {
+                status.textContent = result.error || 'Unable to upload this document.';
+                return;
+            }
+            form.reset();
+            status.textContent = 'Private document uploaded.';
+            await loadMedicalDocuments('staff-medical-document-list');
+        } catch (error) {
+            console.error('Error uploading medical document:', error);
+            status.textContent = 'Unable to upload this document right now.';
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
 function setupClinicalForms() {
     const medicineForm = document.getElementById('clinical-medicine-form');
     const bloodForm = document.getElementById('clinical-blood-form');
@@ -3054,6 +3613,7 @@ function setupClinicalForms() {
                     dose: value('clinical-medicine-dose'),
                     frequency: value('clinical-medicine-frequency'),
                     duration: value('clinical-medicine-duration'),
+                    quantity: Number(value('clinical-medicine-quantity')),
                     instructions: value('clinical-medicine-instructions')
                 }
             }, document.getElementById('clinical-medicine-status'), medicineForm.querySelector('button[type="submit"]'));
@@ -3277,6 +3837,7 @@ async function loadPatientDashboard() {
         const patient = await response.json();
         patientAssignedDoctorId = Number(patient.assignedDoctor) || null;
         renderPatientHealthPanel(patient);
+        loadPatientAppointments();
     } catch (error) {
         console.error('Error loading patient dashboard:', error);
         container.innerHTML = `
@@ -3317,6 +3878,8 @@ async function loadFamilyDashboard() {
         renderPatientHealthPanel(patient, 'family-content');
         loadFamilyClinicalRecords();
         loadFamilyDeathRecords();
+        loadFamilyAppointments();
+        loadMedicalDocuments('family-medical-document-list', Number(patient.id));
     } catch (error) {
         console.error('Error loading family dashboard:', error);
         container.innerHTML = `
@@ -3913,6 +4476,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAdminMourningForm();
     setupAdminDoctorForm();
     setupClinicalForms();
+    setupMedicineStockForm();
+    setupMedicalDocumentForm();
     setupFamilyMedicineRequestForm();
     setupDeathCertificateForm();
     const doctorLeaveForm = document.getElementById('doctor-leave-form');
