@@ -741,6 +741,20 @@ function normalize_login_key($value)
     return preg_replace('/\s+/', ' ', trim((string)$value));
 }
 
+function verify_user_password($user, $password)
+{
+    $stored = (string)($user['password'] ?? '');
+    $password = (string)$password;
+    $passwordInfo = password_get_info($stored);
+    if (($passwordInfo['algoName'] ?? 'unknown') !== 'unknown') {
+        return password_verify($password, $stored);
+    }
+
+    if ($stored === '' || !hash_equals($stored, $password)) return false;
+    update_row('users', (int)$user['id'], ['password' => password_hash($password, PASSWORD_DEFAULT)]);
+    return true;
+}
+
 function handle_auth_routes($method, $segments, $body)
 {
     $route = $segments[1] ?? '';
@@ -764,7 +778,7 @@ function handle_auth_routes($method, $segments, $body)
                 || (strcasecmp($storedEmail, $username) === 0)
                 || (normalize_login_key($storedName) === $usernameKey);
 
-            if ($identifierMatched && ($user['password'] ?? '') === $password) {
+            if ($identifierMatched && verify_user_password($user, $password)) {
                 $token = create_token($user);
                 respond(200, ['token' => $token, 'user' => sanitize_user($user)]);
             }
@@ -875,7 +889,7 @@ function handle_auth_routes($method, $segments, $body)
 
         $newUser = add_row('users', [
             'username' => $username,
-            'password' => $password,
+            'password' => password_hash($password, PASSWORD_DEFAULT),
             'name' => $name,
             'role' => $role,
             'email' => $email,
@@ -1481,7 +1495,15 @@ function handle_user_routes($method, $segments, $body)
             respond(403, ['error' => 'Insufficient permissions']);
         }
 
-        $updated = update_row('users', $targetId, $body);
+        $updates = $body;
+        if (array_key_exists('password', $updates)) {
+            $newPassword = (string)$updates['password'];
+            if (strlen($newPassword) < 8 || strlen($newPassword) > 128) {
+                respond(400, ['error' => 'Password must be 8-128 characters']);
+            }
+            $updates['password'] = password_hash($newPassword, PASSWORD_DEFAULT);
+        }
+        $updated = update_row('users', $targetId, $updates);
         respond(200, ['message' => 'User updated successfully', 'user' => sanitize_user($updated)]);
     }
 
