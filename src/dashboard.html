@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=all-clinical-features-20261009">
+    <link rel="stylesheet" href="css/styles.css?v=pharmacy-role-20261010">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=all-clinical-features-20261009" defer></script>
+    <script src="js/dashboard.js?v=pharmacy-role-20261010" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -58,6 +58,9 @@
                 </li>
                 <li id="staff-menu-3" style="display: none;">
                     <a href="#" onclick="switchSection('staff-clinical-section')" class="nav-link">Clinical Review <span id="staff-clinical-badge" class="nav-badge" hidden>0</span></a>
+                </li>
+                <li id="pharmacy-menu" style="display: none;">
+                    <a href="#" onclick="switchSection('pharmacy-section')" class="nav-link">Pharmacy Stock</a>
                 </li>
                 
                 <!-- ADMIN MENU -->
@@ -541,20 +544,6 @@
                 <div id="staff-appointment-reschedules" class="appointment-action-list"></div>
             </div>
             <div class="card">
-                <h3>Pharmacy stock</h3>
-                <form id="medicine-stock-form" class="medicine-stock-form">
-                    <div class="clinical-field-row">
-                        <input id="medicine-stock-name" type="text" maxlength="120" placeholder="Medicine name" aria-label="Medicine name" required>
-                        <input id="medicine-stock-unit" type="text" maxlength="40" placeholder="Unit (e.g. tablet)" aria-label="Stock unit" required>
-                        <input id="medicine-stock-quantity" type="number" min="0" max="100000" step="1" placeholder="In stock" aria-label="Current stock" required>
-                        <input id="medicine-stock-minimum" type="number" min="0" max="100000" step="1" placeholder="Low-stock alert at" aria-label="Low stock threshold" required>
-                    </div>
-                    <button class="btn btn-primary btn-small" type="submit">Add medicine</button>
-                    <p id="medicine-stock-status" class="form-status" role="status" aria-live="polite"></p>
-                </form>
-                <div id="medicine-stock-list" class="medicine-stock-list"></div>
-            </div>
-            <div class="card">
                 <h3>Medical attachments</h3>
                 <form id="medical-document-form" class="medical-document-form">
                     <div class="clinical-field-row">
@@ -572,6 +561,30 @@
                     <p id="medical-document-status" class="form-status" role="status" aria-live="polite"></p>
                 </form>
                 <div id="staff-medical-document-list" class="medical-document-list"></div>
+            </div>
+        </div>
+
+        <div id="pharmacy-section" class="content-section">
+            <div class="header">
+                <h1>Pharmacy Stock</h1>
+            </div>
+            <p class="admin-doctor-intro">Manage medicine quantities and low-stock thresholds. Nurse approval deducts requested units from stock.</p>
+            <div class="card">
+                <h3>Add medicine</h3>
+                <form id="medicine-stock-form" class="medicine-stock-form">
+                    <div class="clinical-field-row">
+                        <input id="medicine-stock-name" type="text" maxlength="120" placeholder="Medicine name" aria-label="Medicine name" required>
+                        <input id="medicine-stock-unit" type="text" maxlength="40" placeholder="Unit (e.g. tablet)" aria-label="Stock unit" required>
+                        <input id="medicine-stock-quantity" type="number" min="0" max="100000" step="1" placeholder="In stock" aria-label="Current stock" required>
+                        <input id="medicine-stock-minimum" type="number" min="0" max="100000" step="1" placeholder="Low-stock alert at" aria-label="Low stock threshold" required>
+                    </div>
+                    <button class="btn btn-primary btn-small" type="submit">Add medicine</button>
+                    <p id="medicine-stock-status" class="form-status" role="status" aria-live="polite"></p>
+                </form>
+            </div>
+            <div class="card">
+                <h3>Current inventory</h3>
+                <div id="medicine-stock-list" class="medicine-stock-list"></div>
             </div>
         </div>
 
@@ -731,6 +744,29 @@
                 <h3>Hospital Staff & Users</h3>
                 <div id="admin-users"></div>
             </div>
+            <form id="admin-pharmacy-form" class="card admin-doctor-form" autocomplete="off">
+                <h3>Create pharmacy account</h3>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="admin-pharmacy-name">Full name</label>
+                        <input id="admin-pharmacy-name" type="text" maxlength="120" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-pharmacy-username">Username</label>
+                        <input id="admin-pharmacy-username" type="text" maxlength="120" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-pharmacy-email">Email</label>
+                        <input id="admin-pharmacy-email" type="email" maxlength="160" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-pharmacy-password">Temporary password</label>
+                        <input id="admin-pharmacy-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+                    </div>
+                </div>
+                <button class="btn btn-primary" type="submit">Create pharmacy account</button>
+                <p id="admin-pharmacy-status" class="form-status" role="status" aria-live="polite"></p>
+            </form>
         </div>
 
         <div id="admin-doctors-section" class="content-section">
@@ -984,6 +1020,7 @@
             const menus = {
                 'doctor': ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5', 'doctor-menu-6', 'doctor-menu-7'],
                 'staff': ['staff-menu', 'staff-menu-2'],
+                'pharmacy': ['pharmacy-menu'],
                 'admin': ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7'],
                 'patient': ['patient-menu', 'patient-menu-2'],
                 'family': ['patient-menu', 'family-menu']

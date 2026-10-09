@@ -116,6 +116,8 @@ async function refreshRoleDashboard() {
         await loadDoctorDashboard();
     } else if (role === 'staff') {
         await loadStaffDashboard();
+    } else if (role === 'pharmacy') {
+        await loadPharmacyDashboard();
     } else if (role === 'admin') {
         await loadAdminDashboard();
     } else if (role === 'patient') {
@@ -470,6 +472,9 @@ async function initializeDashboard() {
         case 'staff':
             loadStaffDashboard();
             break;
+        case 'pharmacy':
+            loadPharmacyDashboard();
+            break;
         case 'admin':
             loadAdminDashboard();
             break;
@@ -486,6 +491,7 @@ function showDashboardRoleMenu(role) {
     const menuIds = {
         doctor: ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5', 'doctor-menu-6', 'doctor-menu-7'],
         staff: ['staff-menu', 'staff-menu-2', 'staff-menu-3'],
+        pharmacy: ['pharmacy-menu'],
         admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7'],
         patient: ['patient-menu', 'patient-menu-2'],
         family: ['family-menu', 'patient-menu', 'patient-menu-2']
@@ -1657,6 +1663,10 @@ async function submitCodeBlue() {
         console.error('Error sending Code Blue:', error);
         showNotification('Failed to send Code Blue alert.', 'danger');
     }
+}
+
+async function loadPharmacyDashboard() {
+    await loadMedicineStock('medicine-stock-list', true);
 }
 
 // STAFF DASHBOARD
@@ -3696,6 +3706,43 @@ function setupAdminDoctorForm() {
     });
 }
 
+function setupAdminPharmacyForm() {
+    const form = document.getElementById('admin-pharmacy-form');
+    const status = document.getElementById('admin-pharmacy-status');
+    if (!form || !status) return;
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]');
+        const payload = {
+            role: 'pharmacy',
+            name: document.getElementById('admin-pharmacy-name').value.trim(),
+            username: document.getElementById('admin-pharmacy-username').value.trim(),
+            email: document.getElementById('admin-pharmacy-email').value.trim(),
+            password: document.getElementById('admin-pharmacy-password').value
+        };
+        button.disabled = true;
+        status.textContent = 'Creating pharmacy account...';
+        try {
+            const response = await apiCall('/auth/register', { method: 'POST', body: JSON.stringify(payload) });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok) {
+                status.textContent = result.error || 'Unable to create pharmacy account.';
+                return;
+            }
+            form.reset();
+            status.textContent = `Pharmacy account created for ${result.user?.name || payload.name}.`;
+            showNotification('Pharmacy account created.', 'success');
+            await loadAdminDashboard();
+        } catch (error) {
+            console.error('Error creating pharmacy account:', error);
+            status.textContent = 'Unable to create pharmacy account right now.';
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
 function setupAdminMourningForm() {
     const form = document.getElementById('admin-mourning-form');
     if (!form) return;
@@ -4461,6 +4508,7 @@ function openRoleAlerts() {
         admin: 'admin-section',
         doctor: 'doctor-messages-section',
         staff: 'staff-patients-section',
+        pharmacy: 'pharmacy-section',
         patient: 'patient-messages-section',
         family: 'family-section'
     };
@@ -4475,6 +4523,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAdminBulletinForm();
     setupAdminMourningForm();
     setupAdminDoctorForm();
+    setupAdminPharmacyForm();
     setupClinicalForms();
     setupMedicineStockForm();
     setupMedicalDocumentForm();

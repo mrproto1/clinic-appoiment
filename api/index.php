@@ -796,13 +796,13 @@ function handle_auth_routes($method, $segments, $body)
             }
         }
 
-        $allowedRoles = ['doctor', 'staff', 'admin', 'patient', 'family'];
+        $allowedRoles = ['doctor', 'staff', 'admin', 'patient', 'family', 'pharmacy'];
         if (!in_array($role, $allowedRoles, true)) {
             $role = 'patient';
         }
 
         $department = trim((string)($body['department'] ?? ''));
-        if (in_array($role, ['doctor', 'staff', 'admin'], true)) {
+        if (in_array($role, ['doctor', 'staff', 'admin', 'pharmacy'], true)) {
             require_auth(['admin']);
             if (strlen($password) < 8) {
                 respond(400, ['error' => 'Password must be at least 8 characters']);
@@ -2736,14 +2736,14 @@ function find_medicine_stock($name)
 
 function handle_medicine_stock_routes($method, $segments, $body)
 {
-    $user = require_auth(['admin', 'staff', 'doctor']);
+    $user = require_auth(['admin', 'staff', 'doctor', 'pharmacy']);
     if ($method === 'GET' && count($segments) === 1) {
         $items = read_data('medicine_stock');
         usort($items, function ($a, $b) { return strcasecmp((string)($a['name'] ?? ''), (string)($b['name'] ?? '')); });
         respond(200, $items);
     }
 
-    if (!in_array($user['role'], ['admin', 'staff'], true)) {
+    if (!in_array($user['role'], ['admin', 'staff', 'pharmacy'], true)) {
         respond(403, ['error' => 'Only pharmacy staff or admins can change medicine stock']);
     }
 
@@ -2805,7 +2805,7 @@ function find_patient_by_email($email)
 
 function handle_notification_routes($method, $segments, $body)
 {
-    $user = require_auth(['admin', 'staff', 'doctor', 'patient', 'family']);
+    $user = require_auth(['admin', 'staff', 'doctor', 'patient', 'family', 'pharmacy']);
 
     if ($method === 'GET' && count($segments) === 1) {
         $appointments = read_data('appointments');
