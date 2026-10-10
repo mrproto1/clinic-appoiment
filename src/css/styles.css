@@ -5742,6 +5742,10 @@ body.dashboard [hidden] {
 .ward-bed-actions select { flex:1 1 180px; width:auto; min-width:130px; margin:0; padding:8px; font-size:.74rem; }
 .ward-bed-actions input { width:90px; margin:0; padding:7px; font-size:.74rem; }
 
+.dashboard-load-alert { display:flex; align-items:center; justify-content:space-between; gap:14px; margin:0 0 16px; padding:12px 14px; color:#75451f; background:#fff7e9; border:1px solid #eed6ad; border-left:4px solid #c98c39; border-radius:5px; }
+.dashboard-load-alert[hidden] { display:none; }
+.dashboard-load-alert p { margin:0; font-size:.8rem; line-height:1.5; }
+
 @media (max-width:700px) {
     .ward-bed-row { grid-template-columns:1fr; }
     .ward-bed-actions { justify-content:flex-start; }

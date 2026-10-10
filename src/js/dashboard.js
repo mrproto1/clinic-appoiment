@@ -1859,8 +1859,16 @@ function displayStaffStats(patients, appointments = []) {
 
 // ADMIN DASHBOARD
 async function loadAdminDashboard() {
+    const alert = document.getElementById('admin-dashboard-alert');
+    const alertMessage = document.getElementById('admin-dashboard-alert-message');
+    const setAlert = (message) => {
+        if (alertMessage) alertMessage.textContent = message;
+        if (alert) alert.hidden = !message;
+    };
+    let timeoutId;
+
     try {
-        const [patientsRes, usersRes, appointmentsRes, leavesRes, bulletinsRes, siteStatusRes] = await Promise.all([
+        const requestBatch = Promise.all([
             apiCall('/patients'),
             apiCall('/users'),
             apiCall('/appointments'),
@@ -1868,11 +1876,25 @@ async function loadAdminDashboard() {
             apiCall('/bulletins/manage'),
             apiCall('/site-status')
         ]);
+        const requestTimeout = new Promise((_, reject) => {
+            timeoutId = window.setTimeout(() => reject(new Error('Admin dashboard request timed out')), 15000);
+        });
+        const [patientsRes, usersRes, appointmentsRes, leavesRes, bulletinsRes, siteStatusRes] = await Promise.race([requestBatch, requestTimeout]);
+        window.clearTimeout(timeoutId);
 
-        if (!patientsRes || !patientsRes.ok || !usersRes || !usersRes.ok) return;
+        if (!patientsRes || !patientsRes.ok || !usersRes || !usersRes.ok) {
+            const patientStatus = patientsRes ? `HTTP ${patientsRes.status}` : 'no response';
+            const userStatus = usersRes ? `HTTP ${usersRes.status}` : 'no response';
+            setAlert(`Unable to load admin data (patients: ${patientStatus}; users: ${userStatus}). Check the Railway API/session, then retry.`);
+            return;
+        }
 
         const patients = await patientsRes.json();
         const users = await usersRes.json();
+        if (!Array.isArray(patients) || !Array.isArray(users)) {
+            setAlert('The server returned an unexpected admin data response. Check the Railway deployment, then retry.');
+            return;
+        }
         const appointments = appointmentsRes && appointmentsRes.ok ? await appointmentsRes.json() : [];
         const leaves = leavesRes && leavesRes.ok ? await leavesRes.json() : [];
         const bulletins = bulletinsRes && bulletinsRes.ok ? await bulletinsRes.json() : null;
@@ -1891,8 +1913,11 @@ async function loadAdminDashboard() {
         if (siteStatus) displayMourningSettings(siteStatus);
         loadAdminDeathRecords();
         loadAdminAuditLogs();
+        setAlert('');
     } catch (error) {
+        if (timeoutId) window.clearTimeout(timeoutId);
         console.error('Error loading admin dashboard:', error);
+        setAlert('Unable to load the admin dashboard. Check your connection and Railway API, then retry.');
     }
 }
 

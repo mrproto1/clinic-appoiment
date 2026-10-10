@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=ward-management-20261010b">
+    <link rel="stylesheet" href="css/styles.css?v=admin-load-state-20261010">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=ward-management-20261010b" defer></script>
+        <script src="js/dashboard.js?v=admin-load-state-20261010" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -630,6 +630,10 @@
         <div id="admin-section" class="content-section">
             <div class="header">
                 <h1>⚙️ Administration Dashboard</h1>
+            </div>
+            <div id="admin-dashboard-alert" class="dashboard-load-alert" role="status" aria-live="polite" hidden>
+                <p id="admin-dashboard-alert-message"></p>
+                <button class="btn btn-small btn-secondary" type="button" onclick="loadAdminDashboard()">Retry</button>
             </div>
 
             <div id="admin-stats" class="grid"></div>
