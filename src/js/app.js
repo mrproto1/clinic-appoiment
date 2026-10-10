@@ -2,12 +2,60 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     initManagementModal();
+    initPrimaryNavigation();
     initOrganDonorTribute();
 
     console.log('Clinic Appointment System is ready.');
 
     initScrollReveal();
 });
+
+function initPrimaryNavigation() {
+    const nav = document.getElementById('protocol-primary-nav');
+    const toggle = document.querySelector('.protocol-menu-toggle');
+    if (!nav || !toggle) return;
+
+    const closeMenu = () => {
+        nav.classList.remove('is-open');
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.setAttribute('aria-label', 'Open navigation menu');
+            nav.querySelectorAll('.protocol-nav-group').forEach((group) => { group.open = false; });
+    };
+
+    toggle.addEventListener('click', () => {
+        const isOpen = nav.classList.toggle('is-open');
+        toggle.setAttribute('aria-expanded', String(isOpen));
+        toggle.setAttribute('aria-label', isOpen ? 'Close navigation menu' : 'Open navigation menu');
+    });
+
+    nav.querySelectorAll('.protocol-nav-group').forEach((group) => {
+        group.addEventListener('toggle', () => {
+            if (!group.open) return;
+            nav.querySelectorAll('.protocol-nav-group').forEach((other) => {
+                if (other !== group) other.open = false;
+            });
+        });
+    });
+
+    nav.querySelectorAll('a').forEach((link) => link.addEventListener('click', closeMenu));
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.protocol-nav-shell')) {
+            closeMenu();
+            nav.querySelectorAll('.protocol-nav-group').forEach((group) => { group.open = false; });
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        const focusedGroup = event.target.closest?.('.protocol-nav-group');
+        if (focusedGroup) focusedGroup.open = false;
+        closeMenu();
+        toggle.focus();
+    });
+
+    window.matchMedia('(min-width: 1101px)').addEventListener('change', (event) => {
+        if (event.matches) closeMenu();
+    });
+}
 
 function getLocalApiBase() {
     const runtimeBase = window.APP_RUNTIME_CONFIG && typeof window.APP_RUNTIME_CONFIG.apiBase === 'string'

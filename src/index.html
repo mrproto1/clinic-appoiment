@@ -1,3 +1,4 @@
+    <link rel="stylesheet" href="css/styles.css?v=compact-home-nav-20261010">
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,13 +8,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=fullscreen-root-fix-20261001">
+    <link rel="stylesheet" href="css/styles.css?v=compact-home-nav-20261010">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/app.js?v=api-base-20261006" defer></script>
+    <script src="js/app.js?v=compact-home-nav-20261010" defer></script>
     <script src="js/faq-chat.js?v=20260928" defer></script>
 </head>
 <body class="homepage-protocol" id="home">
@@ -28,22 +29,42 @@
                 </div>
             </div>
 
-            <nav class="protocol-top-nav" aria-label="Primary navigation">
+            <button class="protocol-menu-toggle" type="button" aria-expanded="false" aria-controls="protocol-primary-nav" aria-label="Open navigation menu">
+                <span aria-hidden="true">☰</span>
+                <span class="protocol-menu-toggle-label">Menu</span>
+            </button>
+
+            <nav id="protocol-primary-nav" class="protocol-top-nav" aria-label="Primary navigation">
                 <a href="#home" class="active">Home</a>
-                <a href="#protocol-about">About Us</a>
-                <a href="#protocol-history">Our Story</a>
-                <a href="#protocol-services">Services</a>
-                <a href="pages/doctors.html">Our Specialists</a>
-                <a href="pages/appointments.html">Patient Guide</a>
-                <a href="pages/family-access.html">Family Access</a>
-                <a href="pages/bulletin.html">Hospital Bulletin</a>
-                <a href="pages/organ-donors.html">Organ Donor Tribute</a>
-                <a href="pages/contact.html">Contact Us</a>
+                <details class="protocol-nav-group">
+                    <summary>About</summary>
+                    <div class="protocol-nav-menu">
+                        <a href="#protocol-about">About Us</a>
+                        <a href="#protocol-history">Our Story</a>
+                    </div>
+                </details>
+                <details class="protocol-nav-group">
+                    <summary>Care</summary>
+                    <div class="protocol-nav-menu">
+                        <a href="#protocol-services">Services</a>
+                        <a href="pages/doctors.html">Specialists</a>
+                        <a href="pages/appointments.html">Patient Guide</a>
+                    </div>
+                </details>
+                <details class="protocol-nav-group">
+                    <summary>More</summary>
+                    <div class="protocol-nav-menu">
+                        <a href="pages/family-access.html">Family Access</a>
+                        <a href="pages/bulletin.html">Hospital Bulletin</a>
+                        <a href="pages/organ-donors.html">Organ Donor Tribute</a>
+                        <a href="pages/contact.html">Contact Us</a>
+                    </div>
+                </details>
             </nav>
 
             <div class="protocol-nav-actions">
                 <button type="button" class="protocol-management-btn" data-open-management>Hospital Management</button>
-                <a href="pages/appointments.html" class="protocol-appointment-btn">Appointment</a>
+                <a href="pages/appointments.html" class="protocol-appointment-btn">Book Appointment</a>
             </div>
         </header>
 

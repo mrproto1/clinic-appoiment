@@ -5716,3 +5716,160 @@ body.dashboard [hidden] {
     .audit-log-item { grid-template-columns:1fr; }
     .audit-log-item time { grid-column:1; grid-row:auto; text-align:left; }
 }
+
+/* Compact homepage navigation */
+.protocol-nav-shell {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 18px;
+}
+
+.protocol-top-nav {
+    min-width: 0;
+    flex-wrap: nowrap;
+    gap: clamp(10px, 1.5vw, 21px);
+}
+
+.protocol-top-nav > a,
+.protocol-nav-group > summary {
+    color: rgba(255, 255, 255, 0.98);
+    text-decoration: none;
+    font: 700 0.82rem 'Manrope', 'Segoe UI', sans-serif;
+    white-space: nowrap;
+}
+
+.protocol-nav-group {
+    position: relative;
+}
+
+.protocol-nav-group > summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.protocol-nav-group > summary::-webkit-details-marker { display: none; }
+.protocol-nav-group > summary::after { content: '⌄'; font-size: 0.8rem; }
+.protocol-nav-group[open] > summary::after { content: '⌃'; }
+
+.protocol-nav-menu {
+    position: absolute;
+    z-index: 8;
+    top: calc(100% + 12px);
+    left: -14px;
+    display: grid;
+    min-width: 190px;
+    gap: 2px;
+    padding: 7px;
+    background: #fff;
+    border: 1px solid rgba(16, 40, 68, 0.12);
+    border-radius: 6px;
+    box-shadow: 0 12px 28px rgba(15, 35, 57, 0.2);
+}
+
+.protocol-nav-menu a {
+    display: block;
+    padding: 9px 10px;
+    color: #243c50;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.protocol-nav-menu a:hover,
+.protocol-nav-menu a:focus-visible {
+    color: #174f63;
+    background: #edf5f5;
+}
+
+.protocol-menu-toggle { display: none; }
+
+.protocol-nav-shell .protocol-nav-actions { gap: 8px; }
+.protocol-nav-shell .protocol-management-btn { padding: 9px 12px; font-size: 0.75rem; white-space: nowrap; }
+.protocol-nav-shell .protocol-appointment-btn { padding: 10px 14px; font-size: 0.78rem; white-space: nowrap; }
+
+@media (max-width: 1100px) {
+    .protocol-nav-shell {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+    }
+
+    .protocol-logo-block { grid-column: 1; grid-row: 1; }
+
+    .protocol-menu-toggle {
+        grid-column: 2;
+        grid-row: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-width: 88px;
+        min-height: 42px;
+        padding: 8px 12px;
+        color: #102d49;
+        background: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.65);
+        border-radius: 5px;
+        cursor: pointer;
+        font: 700 0.84rem 'Manrope', 'Segoe UI', sans-serif;
+    }
+
+    .protocol-menu-toggle[aria-expanded="true"] { background: #e9f2f5; }
+
+    .protocol-nav-shell .protocol-top-nav {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        display: none;
+        align-items: stretch;
+        flex-direction: column;
+        gap: 3px;
+        width: 100%;
+        padding: 5px 0 2px;
+    }
+
+    .protocol-nav-shell .protocol-top-nav.is-open { display: flex; }
+
+    .protocol-nav-shell .protocol-top-nav > a,
+    .protocol-nav-shell .protocol-nav-group > summary {
+        min-height: 40px;
+        padding: 10px 12px;
+        color: #fff;
+        background: rgba(8, 38, 68, 0.24);
+        border-radius: 4px;
+        font-size: 0.86rem;
+    }
+
+    .protocol-nav-group { width: 100%; }
+
+    .protocol-nav-menu {
+        position: static;
+        min-width: 0;
+        margin: 3px 0 5px;
+        padding: 4px 5px 4px 13px;
+        background: rgba(7, 34, 60, 0.2);
+        border: 0;
+        border-left: 2px solid rgba(236, 201, 127, 0.85);
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    .protocol-nav-menu a { color: #fff; white-space: normal; }
+    .protocol-nav-menu a:hover,
+    .protocol-nav-menu a:focus-visible { color: #fff; background: rgba(255, 255, 255, 0.13); }
+
+    .protocol-nav-shell .protocol-nav-actions {
+        grid-column: 1 / -1;
+        grid-row: 3;
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 480px) {
+    .protocol-nav-shell { padding: 14px; border-radius: 0 0 12px 12px; }
+    .protocol-logo-text h1 { font-size: 1.55rem; }
+    .protocol-nav-shell .protocol-nav-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+    .protocol-nav-shell .protocol-management-btn,
+    .protocol-nav-shell .protocol-appointment-btn { display: flex; justify-content: center; min-width: 0; padding: 10px 8px; white-space: normal; text-align: center; }
+}
