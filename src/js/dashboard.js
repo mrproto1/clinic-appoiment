@@ -490,9 +490,9 @@ async function initializeDashboard() {
 function showDashboardRoleMenu(role) {
     const menuIds = {
         doctor: ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5', 'doctor-menu-6', 'doctor-menu-7'],
-        staff: ['staff-menu', 'staff-menu-2', 'staff-menu-3'],
+        staff: ['staff-menu', 'staff-menu-2', 'staff-menu-3', 'staff-menu-4'],
         pharmacy: ['pharmacy-menu'],
-        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7'],
+        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7', 'admin-menu-8'],
         patient: ['patient-menu', 'patient-menu-2'],
         family: ['family-menu', 'patient-menu', 'patient-menu-2']
     };
@@ -1690,6 +1690,7 @@ async function loadStaffDashboard() {
         staffAppointmentCache = Array.isArray(appointments) ? appointments : [];
 
         displayStaffPatients(staffPatientCache);
+        loadWardManagement(staffPatientCache);
         displayStaffStats(staffPatientCache, staffAppointmentCache);
         displayStaffMessages(messages);
         displayStaffAppointments(staffAppointmentCache);
@@ -1879,6 +1880,7 @@ async function loadAdminDashboard() {
 
         displayAdminStats(patients, users, appointments, leaves);
         displayAdminPriorityWatchlist(patients);
+        loadWardManagement(patients);
         displayAdminUsers(users);
         displayAdminDoctors(users);
         displayAdminPatients(patients);
@@ -3382,6 +3384,188 @@ function setupDeathCertificateForm() {
     });
 }
 
+let wardPatientCache = [];
+
+function renderWardOverview(beds) {
+    const container = document.getElementById('ward-overview-stats');
+    if (!container) return;
+    const occupied = beds.filter((bed) => bed.status === 'Occupied').length;
+    const maintenance = beds.filter((bed) => bed.status === 'Maintenance').length;
+    const available = beds.filter((bed) => bed.status === 'Available').length;
+    const wards = new Set(beds.map((bed) => normalizeWardName(bed.wardName))).size;
+    const stats = [
+        ['Wards', wards],
+        ['Total beds', beds.length],
+        ['Occupied', occupied],
+        ['Available', available],
+        ['Maintenance', maintenance]
+    ];
+    container.innerHTML = stats.map(([label, value]) => `
+        <div class="stat-card ${label === 'Available' ? 'success' : label === 'Maintenance' ? 'warning' : 'info'}">
+            <h4>${label}</h4><div class="number">${value}</div>
+        </div>
+    `).join('');
+}
+
+function normalizeWardName(value) {
+    return String(value || '').trim().toLocaleLowerCase();
+}
+
+async function loadWardManagement(patients) {
+    if (Array.isArray(patients)) wardPatientCache = patients.filter((patient) => patient.status !== 'discharged');
+    const list = document.getElementById('ward-bed-list');
+    if (!list) return;
+
+    try {
+        const response = await apiCall('/wards');
+        if (!response || !response.ok) {
+            list.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Ward service is unavailable. Deploy the latest API to Railway.'));
+            return;
+        }
+        const beds = await response.json();
+        renderWardOverview(Array.isArray(beds) ? beds : []);
+        renderWardBedList(Array.isArray(beds) ? beds : []);
+    } catch (error) {
+        console.error('Error loading wards:', error);
+        list.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load wards and beds.'));
+    }
+}
+
+function renderWardBedList(beds) {
+    const list = document.getElementById('ward-bed-list');
+    if (!list) return;
+    if (!beds.length) {
+        list.replaceChildren(clinicalEl('p', 'muted-text', 'No wards yet. Add a ward and bed to start tracking occupancy.'));
+        return;
+    }
+
+    const groups = new Map();
+    beds.forEach((bed) => {
+        const key = normalizeWardName(bed.wardName) || 'unassigned ward';
+        if (!groups.has(key)) groups.set(key, { name: bed.wardName || 'Unassigned ward', beds: [] });
+        groups.get(key).beds.push(bed);
+    });
+
+    list.replaceChildren(...[...groups.values()].map((group) => {
+        const ward = clinicalEl('section', 'ward-group');
+        const occupied = group.beds.filter((bed) => bed.status === 'Occupied').length;
+        const heading = clinicalEl('div', 'ward-group-heading');
+        heading.append(clinicalEl('h4', '', group.name));
+        heading.append(clinicalEl('span', 'muted-text', `${occupied} / ${group.beds.length} occupied`));
+        ward.append(heading);
+
+        const rows = clinicalEl('div', 'ward-bed-rows');
+        group.beds.forEach((bed) => {
+            const row = clinicalEl('article', `ward-bed-row is-${String(bed.status || 'Available').toLowerCase()}`);
+            const identity = clinicalEl('div', 'ward-bed-identity');
+            identity.append(clinicalEl('strong', '', bed.bedNumber));
+            identity.append(clinicalEl('span', `ward-bed-status is-${String(bed.status || 'Available').toLowerCase()}`, bed.status || 'Available'));
+            identity.append(clinicalEl('span', 'ward-bed-patient', bed.patientName || 'No patient assigned'));
+            row.append(identity);
+
+            const actions = clinicalEl('div', 'ward-bed-actions');
+            if (bed.status === 'Occupied') {
+                const release = clinicalEl('button', 'btn btn-small btn-secondary', 'Release bed');
+                release.type = 'button';
+                release.addEventListener('click', () => updateWardBedAction(bed.id, 'release', {}, release));
+                actions.append(release);
+            } else if (bed.status === 'Available') {
+                const select = document.createElement('select');
+                select.setAttribute('aria-label', `Assign patient to ${group.name} ${bed.bedNumber}`);
+                select.append(new Option('-- Assign patient --', ''));
+                wardPatientCache.forEach((patient) => select.append(new Option(`${patient.patientCode || 'N/A'} · ${patient.name}`, String(patient.id))));
+                const assign = clinicalEl('button', 'btn btn-small btn-primary', 'Assign / transfer');
+                assign.type = 'button';
+                assign.addEventListener('click', () => {
+                    if (!select.value) {
+                        showNotification('Select a patient before assigning this bed.', 'warning');
+                        return;
+                    }
+                    updateWardBedAction(bed.id, 'assign', { patientId: Number(select.value) }, assign);
+                });
+                actions.append(select, assign);
+            }
+
+            const statusSelect = document.createElement('select');
+            statusSelect.setAttribute('aria-label', `Bed status for ${bed.bedNumber}`);
+            ['Available', 'Maintenance'].forEach((status) => statusSelect.append(new Option(status, status, false, status === (bed.status || 'Available'))));
+            statusSelect.value = bed.status === 'Maintenance' ? 'Maintenance' : 'Available';
+            const saveStatus = clinicalEl('button', 'btn btn-small btn-secondary', 'Save status');
+            saveStatus.type = 'button';
+            saveStatus.disabled = bed.status === 'Occupied';
+            saveStatus.addEventListener('click', () => updateWardBedAction(bed.id, 'update', { status: statusSelect.value }, saveStatus));
+            actions.append(statusSelect, saveStatus);
+            row.append(actions);
+            rows.append(row);
+        });
+        ward.append(rows);
+        return ward;
+    }));
+}
+
+async function updateWardBedAction(bedId, action, payload, button) {
+    button.disabled = true;
+    try {
+        const response = await apiCall(action === 'update' ? `/wards/${bedId}` : `/wards/${bedId}/${action}`, {
+            method: action === 'update' ? 'PUT' : 'POST',
+            body: JSON.stringify(payload)
+        });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to update bed assignment.', 'danger');
+            return;
+        }
+        showNotification(result.message || 'Ward bed updated.', 'success');
+        await loadWardManagement();
+        if (currentUser.role === 'staff') {
+            const patientResponse = await apiCall('/patients');
+            if (patientResponse?.ok) {
+                staffPatientCache = await patientResponse.json();
+                displayStaffPatients(staffPatientCache);
+            }
+        } else if (currentUser.role === 'admin') {
+            await loadAdminDashboard();
+        }
+    } catch (error) {
+        console.error('Error updating ward bed:', error);
+        showNotification('Unable to update ward bed right now.', 'danger');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function setupWardBedForm() {
+    const form = document.getElementById('ward-bed-form');
+    const status = document.getElementById('ward-bed-form-status');
+    if (!form || !status) return;
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        try {
+            const response = await apiCall('/wards', {
+                method: 'POST',
+                body: JSON.stringify({
+                    wardName: document.getElementById('ward-bed-ward-name').value.trim(),
+                    bedNumber: document.getElementById('ward-bed-number').value.trim()
+                })
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok) {
+                status.textContent = result.error || 'Unable to add ward bed.';
+                return;
+            }
+            form.reset();
+            status.textContent = 'Ward bed added.';
+            await loadWardManagement();
+        } catch (error) {
+            status.textContent = 'Ward service is unavailable. Deploy the latest API to Railway.';
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
 function renderMedicineStock(targetId, items, editable) {
     const container = document.getElementById(targetId);
     if (!container) return;
@@ -4524,6 +4708,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAdminMourningForm();
     setupAdminDoctorForm();
     setupAdminPharmacyForm();
+    setupWardBedForm();
     setupClinicalForms();
     setupMedicineStockForm();
     setupMedicalDocumentForm();

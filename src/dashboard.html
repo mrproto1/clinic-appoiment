@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=pharmacy-role-20261010">
+    <link rel="stylesheet" href="css/styles.css?v=ward-management-20261010b">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=pharmacy-role-20261010" defer></script>
+    <script src="js/dashboard.js?v=ward-management-20261010b" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -59,6 +59,9 @@
                 <li id="staff-menu-3" style="display: none;">
                     <a href="#" onclick="switchSection('staff-clinical-section')" class="nav-link">Clinical Review <span id="staff-clinical-badge" class="nav-badge" hidden>0</span></a>
                 </li>
+                <li id="staff-menu-4" style="display: none;">
+                    <a href="#" onclick="switchSection('ward-management-section')" class="nav-link">Ward Management</a>
+                </li>
                 <li id="pharmacy-menu" style="display: none;">
                     <a href="#" onclick="switchSection('pharmacy-section')" class="nav-link">Pharmacy Stock</a>
                 </li>
@@ -84,6 +87,9 @@
                 </li>
                 <li id="admin-menu-7" style="display: none;">
                     <a href="#" onclick="switchSection('admin-death-section')" class="nav-link">Death Records</a>
+                </li>
+                <li id="admin-menu-8" style="display: none;">
+                    <a href="#" onclick="switchSection('ward-management-section')" class="nav-link">Ward Management</a>
                 </li>
                 
                 <!-- PATIENT MENU -->
@@ -173,8 +179,10 @@
                 <button class="btn btn-primary" onclick="switchSection('doctor-section')">← Back</button>
             </div>
             <div id="doctor-patient-detail"></div>
-        </div>
-
+                <li id="staff-menu-3" style="display: none;">
+                    <a href="#" onclick="switchSection('staff-clinical-section')" class="nav-link">Clinical Review <span id="staff-clinical-badge" class="nav-badge" hidden>0</span></a>
+                <li id="staff-menu-4" style="display: none;">
+                    <a href="#" onclick="switchSection('ward-management-section')" class="nav-link">Ward Management</a>
         <!-- DOCTOR MESSAGES -->
         <div id="doctor-messages-section" class="content-section">
             <div class="header">
@@ -523,6 +531,36 @@
             </div>
             <div class="card">
                 <div id="staff-patient-list"></div>
+            </div>
+        </div>
+
+        <div id="ward-management-section" class="content-section">
+            <div class="header">
+                <h1>Ward Management</h1>
+            </div>
+            <p class="admin-doctor-intro">Track ward capacity, keep bed status current, and assign each active patient to one bed.</p>
+            <div id="ward-overview-stats" class="grid ward-overview-stats"></div>
+            <form id="ward-bed-form" class="card ward-bed-form">
+                <h3>Add a ward bed</h3>
+                <div class="clinical-field-row">
+                    <div class="form-group">
+                        <label for="ward-bed-ward-name">Ward</label>
+                        <input id="ward-bed-ward-name" type="text" maxlength="80" placeholder="e.g. Cardiology" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="ward-bed-number">Bed number</label>
+                        <input id="ward-bed-number" type="text" maxlength="40" placeholder="e.g. C-12" required>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-small" type="submit">Add bed</button>
+                <p id="ward-bed-form-status" class="form-status" role="status" aria-live="polite"></p>
+            </form>
+            <div class="card">
+                <div class="ward-table-heading">
+                    <h3>Ward and bed list</h3>
+                    <button class="btn btn-small btn-secondary" type="button" onclick="loadWardManagement()">Refresh</button>
+                </div>
+                <div id="ward-bed-list" class="ward-bed-list"></div>
             </div>
         </div>
 
@@ -1019,9 +1057,9 @@
         function showRoleMenu(role) {
             const menus = {
                 'doctor': ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5', 'doctor-menu-6', 'doctor-menu-7'],
-                'staff': ['staff-menu', 'staff-menu-2'],
+                'staff': ['staff-menu', 'staff-menu-2', 'staff-menu-3', 'staff-menu-4'],
                 'pharmacy': ['pharmacy-menu'],
-                'admin': ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7'],
+                'admin': ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7', 'admin-menu-8'],
                 'patient': ['patient-menu', 'patient-menu-2'],
                 'family': ['patient-menu', 'family-menu']
             };

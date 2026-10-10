@@ -5717,6 +5717,37 @@ body.dashboard [hidden] {
     .audit-log-item time { grid-column:1; grid-row:auto; text-align:left; }
 }
 
+.ward-overview-stats { margin-bottom:14px; }
+.ward-bed-form { margin-bottom:14px; }
+.ward-bed-form .clinical-field-row { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); margin-bottom:9px; }
+.ward-table-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.ward-table-heading h3 { margin:0; }
+.ward-bed-list { display:grid; gap:14px; }
+.ward-group { overflow:hidden; border:1px solid #e1e8eb; border-radius:5px; }
+.ward-group-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:#f3f7f8; border-bottom:1px solid #e1e8eb; }
+.ward-group-heading h4 { color:#294253; font-size:.84rem; }
+.ward-bed-rows { display:grid; }
+.ward-bed-row { display:grid; grid-template-columns:minmax(140px,.65fr) minmax(0,1.35fr); gap:12px; align-items:center; padding:10px 12px; border-bottom:1px solid #edf1f2; }
+.ward-bed-row:last-child { border-bottom:0; }
+.ward-bed-row.is-occupied { background:#fff; }
+.ward-bed-row.is-maintenance { background:#fffaf1; }
+.ward-bed-identity { display:grid; grid-template-columns:auto auto; align-items:center; justify-content:start; gap:4px 8px; }
+.ward-bed-identity strong { color:#233b4c; font-size:.82rem; }
+.ward-bed-patient { grid-column:1/-1; color:#667a87; font-size:.72rem; }
+.ward-bed-status { display:inline-flex; padding:3px 7px; border-radius:3px; font-size:.64rem; font-weight:800; }
+.ward-bed-status.is-available { color:#21654f; background:#e8f5ee; }
+.ward-bed-status.is-occupied { color:#285a77; background:#e8f1f7; }
+.ward-bed-status.is-maintenance { color:#885a1c; background:#fcf0d8; }
+.ward-bed-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:6px; }
+.ward-bed-actions select { flex:1 1 180px; width:auto; min-width:130px; margin:0; padding:8px; font-size:.74rem; }
+.ward-bed-actions input { width:90px; margin:0; padding:7px; font-size:.74rem; }
+
+@media (max-width:700px) {
+    .ward-bed-row { grid-template-columns:1fr; }
+    .ward-bed-actions { justify-content:flex-start; }
+    .ward-bed-actions select { flex-basis:100%; }
+}
+
 /* Compact homepage navigation */
 .protocol-nav-shell {
     grid-template-columns: auto minmax(0, 1fr) auto;

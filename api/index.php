@@ -32,7 +32,7 @@ if (($segments[0] ?? '') === 'chat') {
 
 initialize_data_store();
 
-$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests', 'death-certificates', 'medicine-stock', 'notifications', 'audit-logs', 'medical-documents'];
+$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests', 'death-certificates', 'medicine-stock', 'notifications', 'audit-logs', 'medical-documents', 'wards'];
 while (!empty($segments) && !in_array($segments[0], $allowedResources, true)) {
     array_shift($segments);
 }
@@ -87,6 +87,9 @@ switch ($resource) {
         break;
     case 'medical-documents':
         handle_medical_document_routes($requestMethod, $segments, $body);
+        break;
+    case 'wards':
+        handle_ward_routes($requestMethod, $segments, $body);
         break;
     default:
         respond(404, ['error' => 'Route not found']);
@@ -392,7 +395,8 @@ function get_collection_table($name)
         'medicine_stock' => 'collection_medicine_stock',
         'notifications' => 'collection_notifications',
         'audit_logs' => 'collection_audit_logs',
-        'medical_documents' => 'collection_medical_documents'
+        'medical_documents' => 'collection_medical_documents',
+        'ward_beds' => 'collection_ward_beds'
     ];
 
     if (!isset($allowed[$name])) {
@@ -980,6 +984,18 @@ function handle_patient_routes($method, $segments, $body)
                 'dischargedAt' => gmdate('c'),
                 'dischargedBy' => (int)$user['id']
             ]);
+            foreach (read_data('ward_beds') as $bed) {
+                if ((int)($bed['patientId'] ?? 0) === $patientId) {
+                    update_row('ward_beds', (int)$bed['id'], [
+                        'status' => 'Available',
+                        'patientId' => null,
+                        'patientName' => null,
+                        'releasedAt' => gmdate('c'),
+                        'releasedBy' => (int)$user['id']
+                    ]);
+                    audit_event($user, 'ward-bed-released-on-discharge', 'ward-bed', $bed['id'], ['patientId' => $patientId]);
+                }
+            }
             foreach ($linkedFamilyIds as $familyId) {
                 delete_row('users', $familyId);
             }
@@ -2742,6 +2758,178 @@ function handle_death_certificate_routes($method, $segments, $body)
     respond(404, ['error' => 'Route not found']);
 }
 
+function normalize_ward_label($value)
+{
+    return strtolower(preg_replace('/\s+/', ' ', trim((string)$value)));
+}
+
+function handle_ward_routes($method, $segments, $body)
+{
+    $user = require_auth(['admin', 'staff']);
+
+    if ($method === 'GET' && count($segments) === 1) {
+        $beds = read_data('ward_beds');
+        usort($beds, function ($a, $b) {
+            return strcasecmp((string)($a['wardName'] ?? ''), (string)($b['wardName'] ?? ''))
+                ?: strcasecmp((string)($a['bedNumber'] ?? ''), (string)($b['bedNumber'] ?? ''));
+        });
+        respond(200, $beds);
+    }
+
+    if ($method === 'POST' && count($segments) === 1) {
+        $wardName = clinical_text($body['wardName'] ?? '', 80, true);
+        $bedNumber = clinical_text($body['bedNumber'] ?? '', 40, true);
+        if ($wardName === null || $bedNumber === null) respond(400, ['error' => 'Ward and bed number are required']);
+
+        foreach (read_data('ward_beds') as $existing) {
+            if (normalize_ward_label($existing['wardName'] ?? '') === normalize_ward_label($wardName)
+                && normalize_ward_label($existing['bedNumber'] ?? '') === normalize_ward_label($bedNumber)) {
+                respond(409, ['error' => 'That bed already exists in this ward']);
+            }
+        }
+
+        $bed = add_row('ward_beds', [
+            'wardName' => $wardName,
+            'bedNumber' => $bedNumber,
+            'status' => 'Available',
+            'patientId' => null,
+            'patientName' => null,
+            'createdBy' => (int)$user['id']
+        ]);
+        audit_event($user, 'ward-bed-created', 'ward-bed', $bed['id']);
+        respond(201, ['message' => 'Ward bed added', 'bed' => $bed]);
+    }
+
+    if ($method === 'POST' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'assign') {
+        $bedId = (int)$segments[1];
+        $patientId = (int)($body['patientId'] ?? 0);
+        if ($patientId <= 0) respond(400, ['error' => 'Choose a patient']);
+        $bed = find_by_id('ward_beds', $bedId);
+        $patient = find_by_id('patients', $patientId);
+        if (!$bed) respond(404, ['error' => 'Ward bed not found']);
+        if (!$patient) respond(404, ['error' => 'Patient not found']);
+        if (($patient['status'] ?? '') === 'discharged') respond(409, ['error' => 'Cannot assign a discharged patient to a bed']);
+        if (($bed['status'] ?? '') === 'Maintenance') respond(409, ['error' => 'This bed is under maintenance']);
+        if ((int)($bed['patientId'] ?? 0) === $patientId) respond(200, ['message' => 'Patient is already assigned to this bed', 'bed' => $bed]);
+        if (($bed['status'] ?? '') !== 'Available' || !empty($bed['patientId'])) respond(409, ['error' => 'This bed is already occupied']);
+
+        $db = get_db();
+        $db->begin_transaction();
+        try {
+            $patientTable = get_collection_table('patients');
+            $patientLock = $db->prepare("SELECT payload FROM `{$patientTable}` WHERE id = ? FOR UPDATE");
+            if (!$patientLock) throw new Exception('Unable to lock patient');
+            $patientLock->bind_param('i', $patientId);
+            if (!$patientLock->execute()) throw new Exception('Unable to lock patient');
+            $lockedPatientRow = $patientLock->get_result()->fetch_assoc();
+            $lockedPatient = $lockedPatientRow ? json_decode($lockedPatientRow['payload'], true) : null;
+            if (!is_array($lockedPatient)) {
+                $db->rollback();
+                respond(404, ['error' => 'Patient no longer exists']);
+            }
+            if (($lockedPatient['status'] ?? '') === 'discharged') {
+                $db->rollback();
+                respond(409, ['error' => 'Cannot assign a discharged patient to a bed']);
+            }
+
+            $wardTable = get_collection_table('ward_beds');
+            $lock = $db->prepare("SELECT payload FROM `{$wardTable}` WHERE id = ? FOR UPDATE");
+            if (!$lock) throw new Exception('Unable to lock bed');
+            $lock->bind_param('i', $bedId);
+            if (!$lock->execute()) throw new Exception('Unable to lock bed');
+            $lockedRow = $lock->get_result()->fetch_assoc();
+            $lockedBed = $lockedRow ? json_decode($lockedRow['payload'], true) : null;
+            if (!is_array($lockedBed) || ($lockedBed['status'] ?? '') !== 'Available' || !empty($lockedBed['patientId'])) {
+                $db->rollback();
+                respond(409, ['error' => 'This bed has just been assigned to another patient']);
+            }
+
+            foreach (read_data('ward_beds') as $occupiedBed) {
+                if ((int)($occupiedBed['patientId'] ?? 0) === $patientId) {
+                    update_row('ward_beds', (int)$occupiedBed['id'], [
+                        'status' => 'Available', 'patientId' => null, 'patientName' => null,
+                        'releasedAt' => gmdate('c'), 'releasedBy' => (int)$user['id']
+                    ]);
+                }
+            }
+
+            $updatedPatient = update_row('patients', $patientId, [
+                'wardBedId' => $bedId,
+                'wardName' => (string)$lockedBed['wardName'],
+                'bedNumber' => (string)$lockedBed['bedNumber']
+            ]);
+            $updatedBed = update_row('ward_beds', $bedId, [
+                'status' => 'Occupied', 'patientId' => $patientId,
+                'patientName' => (string)($patient['name'] ?? ''),
+                'assignedAt' => gmdate('c'), 'assignedBy' => (int)$user['id']
+            ]);
+            $db->commit();
+        } catch (Throwable $error) {
+            $db->rollback();
+            error_log('Ward bed assignment failed: ' . $error->getMessage());
+            respond(500, ['error' => 'Unable to assign patient to this bed']);
+        }
+
+        audit_event($user, 'ward-bed-assigned', 'ward-bed', $bedId, ['patientId' => $patientId]);
+        notify_patient_contacts($patient, 'ward-assigned', 'Ward assignment updated', 'The care team updated the patient ward and bed assignment.');
+        respond(200, ['message' => 'Patient assigned to ward bed', 'bed' => $updatedBed, 'patient' => $updatedPatient]);
+    }
+
+    if ($method === 'POST' && count($segments) === 3 && is_numeric($segments[1]) && $segments[2] === 'release') {
+        $bedId = (int)$segments[1];
+        $bed = find_by_id('ward_beds', $bedId);
+        if (!$bed) respond(404, ['error' => 'Ward bed not found']);
+        if (empty($bed['patientId'])) respond(409, ['error' => 'This bed is not occupied']);
+        $patientId = (int)$bed['patientId'];
+        $patient = find_by_id('patients', $patientId);
+
+        $db = get_db();
+        $db->begin_transaction();
+        try {
+            $updatedBed = update_row('ward_beds', $bedId, [
+                'status' => 'Available', 'patientId' => null, 'patientName' => null,
+                'releasedAt' => gmdate('c'), 'releasedBy' => (int)$user['id']
+            ]);
+            if ($patient) update_row('patients', $patientId, ['wardBedId' => null, 'wardName' => null, 'bedNumber' => null]);
+            $db->commit();
+        } catch (Throwable $error) {
+            $db->rollback();
+            error_log('Ward bed release failed: ' . $error->getMessage());
+            respond(500, ['error' => 'Unable to release this bed']);
+        }
+
+        audit_event($user, 'ward-bed-released', 'ward-bed', $bedId, ['patientId' => $patientId]);
+        if ($patient) notify_patient_contacts($patient, 'ward-released', 'Ward assignment updated', 'The patient bed assignment was removed by the care team.');
+        respond(200, ['message' => 'Ward bed released', 'bed' => $updatedBed]);
+    }
+
+    if ($method === 'PUT' && count($segments) === 2 && is_numeric($segments[1])) {
+        $bedId = (int)$segments[1];
+        $bed = find_by_id('ward_beds', $bedId);
+        if (!$bed) respond(404, ['error' => 'Ward bed not found']);
+        if (!empty($bed['patientId'])) respond(409, ['error' => 'Release the patient before editing bed status or labels']);
+
+        $wardName = clinical_text($body['wardName'] ?? ($bed['wardName'] ?? ''), 80, true);
+        $bedNumber = clinical_text($body['bedNumber'] ?? ($bed['bedNumber'] ?? ''), 40, true);
+        $status = trim((string)($body['status'] ?? ($bed['status'] ?? 'Available')));
+        if ($wardName === null || $bedNumber === null || !in_array($status, ['Available', 'Maintenance'], true)) {
+            respond(400, ['error' => 'Ward/bed labels are invalid or status must be Available or Maintenance']);
+        }
+        foreach (read_data('ward_beds') as $other) {
+            if ((int)$other['id'] !== $bedId
+                && normalize_ward_label($other['wardName'] ?? '') === normalize_ward_label($wardName)
+                && normalize_ward_label($other['bedNumber'] ?? '') === normalize_ward_label($bedNumber)) {
+                respond(409, ['error' => 'That bed already exists in this ward']);
+            }
+        }
+        $updated = update_row('ward_beds', $bedId, ['wardName' => $wardName, 'bedNumber' => $bedNumber, 'status' => $status]);
+        audit_event($user, 'ward-bed-updated', 'ward-bed', $bedId);
+        respond(200, ['message' => 'Ward bed updated', 'bed' => $updated]);
+    }
+
+    respond(404, ['error' => 'Route not found']);
+}
+
 function normalize_medicine_name($value)
 {
     return strtolower(preg_replace('/\s+/', ' ', trim((string)$value)));
@@ -3146,7 +3334,7 @@ function to_minutes($hhmm)
 
 function initialize_data_store()
 {
-    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates', 'medicine_stock', 'notifications', 'audit_logs', 'medical_documents'] as $collection) {
+    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates', 'medicine_stock', 'notifications', 'audit_logs', 'medical_documents', 'ward_beds'] as $collection) {
         ensure_collection_table($collection);
     }
 
