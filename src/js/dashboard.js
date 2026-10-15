@@ -1866,6 +1866,7 @@ async function loadAdminDashboard() {
         if (alert) alert.hidden = !message;
     };
     let timeoutId;
+    setAlert('Loading admin dashboard data…');
 
     try {
         const requestBatch = Promise.all([
