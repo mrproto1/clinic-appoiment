@@ -4744,7 +4744,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (doctorLeaveForm) {
         doctorLeaveForm.addEventListener('submit', submitDoctorLeave);
     }
-    if (document.getElementById('loginForm') === null && isLoggedIn()) {
+    if (document.getElementById('loginForm') === null) {
+        if (!isLoggedIn()) {
+            window.location.replace(window.location.protocol === 'file:' ? './index.html' : `${getAppBasePath()}index.html`);
+            return;
+        }
+
         initializeDashboard().catch((error) => {
             console.error('Error initializing dashboard:', error);
             if (currentUser.role === 'admin') {
