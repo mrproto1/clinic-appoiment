@@ -448,12 +448,10 @@ async function initializeDashboard() {
     updateDashboardHero(currentUser.name, currentUser.role);
     showRoleBasedSections(role);
 
-    await loadDoctorDirectory();
-
     // Initialize WebSocket for real-time updates
     initWebSocket();
-    await pollCodeBlueAlerts();
-    await loadUserNotifications();
+    pollCodeBlueAlerts();
+    loadUserNotifications();
     if (notificationPollTimer) clearInterval(notificationPollTimer);
     notificationPollTimer = setInterval(loadUserNotifications, 30000);
 
@@ -464,11 +462,13 @@ async function initializeDashboard() {
         }
     });
 
-    // Load initial data
+    if (role === 'doctor') {
+        loadDoctorDirectory().then(() => loadDoctorDashboard());
+        return;
+    }
+
+    // Load role data without waiting on unrelated poll requests.
     switch (role) {
-        case 'doctor':
-            loadDoctorDashboard();
-            break;
         case 'staff':
             loadStaffDashboard();
             break;
@@ -1866,7 +1866,7 @@ async function loadAdminDashboard() {
         if (alert) alert.hidden = !message;
     };
     let timeoutId;
-    setAlert('Loading admin dashboard data…');
+    setAlert('Loading admin dashboard data...');
 
     try {
         const requestBatch = Promise.all([
@@ -4745,6 +4745,14 @@ document.addEventListener('DOMContentLoaded', () => {
         doctorLeaveForm.addEventListener('submit', submitDoctorLeave);
     }
     if (document.getElementById('loginForm') === null && isLoggedIn()) {
-        initializeDashboard();
+        initializeDashboard().catch((error) => {
+            console.error('Error initializing dashboard:', error);
+            if (currentUser.role === 'admin') {
+                const alert = document.getElementById('admin-dashboard-alert');
+                const message = document.getElementById('admin-dashboard-alert-message');
+                if (message) message.textContent = 'Unable to initialize the admin dashboard. Refresh the page or log in again.';
+                if (alert) alert.hidden = false;
+            }
+        });
     }
 });
