@@ -10,7 +10,7 @@
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=20260726c" defer></script>
-    <script src="js/dashboard.js?v=dashboard-auth-guard-20261016" defer></script>
+    <script src="js/dashboard.js?v=dashboard-nesting-fix-20261016" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -179,10 +179,8 @@
                 <button class="btn btn-primary" onclick="switchSection('doctor-section')">← Back</button>
             </div>
             <div id="doctor-patient-detail"></div>
-                <li id="staff-menu-3" style="display: none;">
-                    <a href="#" onclick="switchSection('staff-clinical-section')" class="nav-link">Clinical Review <span id="staff-clinical-badge" class="nav-badge" hidden>0</span></a>
-                <li id="staff-menu-4" style="display: none;">
-                    <a href="#" onclick="switchSection('ward-management-section')" class="nav-link">Ward Management</a>
+        </div>
+
         <!-- DOCTOR MESSAGES -->
         <div id="doctor-messages-section" class="content-section">
             <div class="header">
