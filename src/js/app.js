@@ -3,6 +3,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     initManagementModal();
     initPrimaryNavigation();
+    initPublicDoctorDirectory();
     initOrganDonorTribute();
 
     console.log('Clinic Appointment System is ready.');
@@ -75,6 +76,92 @@ function getLocalApiBase() {
     const srcIndex = pathName.indexOf('/src/');
     const projectBase = srcIndex >= 0 ? pathName.substring(0, srcIndex) : '';
     return `${window.location.origin}${projectBase}/api`;
+}
+
+async function initPublicDoctorDirectory() {
+    const container = document.getElementById('doctor-directory');
+    if (!container) return;
+
+    const photos = {
+        muhammadirfan: 'me-cap.png',
+        afifwahdi: 'doctor-afif-wahdi.png',
+        aizuleirfan: 'dr-aizul-eirfan.png',
+        aimishaffiq: 'Aimi.png',
+        hadimirza: 'Hadi.png',
+        muhammadhazim: 'Hazim.png',
+        helmizareef: 'Helmi.png'
+    };
+    const initialsFor = (name) => String(name || 'Doctor').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0].toUpperCase()).join('');
+
+    try {
+        const response = await fetch(`${getLocalApiBase()}/users/role/doctor`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const doctors = await response.json();
+        if (!Array.isArray(doctors)) throw new Error('Unexpected doctor list');
+
+        if (!doctors.length) {
+            container.replaceChildren(Object.assign(document.createElement('p'), { className: 'doctor-directory-message', textContent: 'No doctor accounts are listed yet.' }));
+            return;
+        }
+
+        const cards = doctors.map((doctor, index) => {
+            const card = document.createElement('article');
+            card.className = 'doctor-card featured-doctor';
+
+            const media = document.createElement('div');
+            media.className = 'doctor-media';
+            const placeholder = document.createElement('div');
+            placeholder.className = 'doctor-photo-placeholder';
+            placeholder.setAttribute('aria-hidden', 'true');
+            placeholder.textContent = initialsFor(doctor.name);
+            media.append(placeholder);
+
+            const normalizedName = String(doctor.name || '').toLowerCase().replace(/^dr\.?\s*/, '').replace(/[^a-z0-9]/g, '');
+            const photo = photos[normalizedName];
+            if (photo) {
+                const image = document.createElement('img');
+                image.className = 'doctor-photo';
+                image.src = `../images/${photo}`;
+                image.alt = doctor.name || 'Doctor portrait';
+                image.loading = 'lazy';
+                image.addEventListener('error', () => image.remove(), { once: true });
+                media.append(image);
+            }
+
+            const heading = document.createElement('div');
+            heading.className = 'doctor-header';
+            const name = document.createElement('h3');
+            name.textContent = doctor.name || 'Doctor';
+            const specialty = document.createElement('span');
+            specialty.className = 'specialty';
+            specialty.textContent = doctor.department || 'General Medicine';
+            heading.append(name, specialty);
+
+            const email = document.createElement('p');
+            email.className = 'doctor-email';
+            if (doctor.email) {
+                const link = document.createElement('a');
+                link.href = `mailto:${doctor.email}`;
+                link.textContent = doctor.email;
+                email.append(link);
+            } else {
+                email.textContent = 'Contact the hospital for appointment support.';
+            }
+
+            const appointment = document.createElement('a');
+            appointment.href = 'appointments.html';
+            appointment.className = 'button';
+            appointment.textContent = 'Book Appointment';
+            card.append(media, heading, email, appointment);
+            card.style.setProperty('--reveal-delay', `${Math.min(index * 60, 360)}ms`);
+            return card;
+        });
+        container.replaceChildren(...cards);
+        container.classList.add('doctors-grid');
+    } catch (error) {
+        console.error('Error loading doctor directory:', error);
+        container.replaceChildren(Object.assign(document.createElement('p'), { className: 'doctor-directory-message', textContent: 'Doctor directory is temporarily unavailable. Please try again later.' }));
+    }
 }
 
 async function initOrganDonorTribute() {

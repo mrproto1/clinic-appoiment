@@ -419,6 +419,38 @@ label {
     transition: transform 0.35s ease;
 }
 
+.doctor-photo-placeholder {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 260px;
+    color: #f3f7fa;
+    background: linear-gradient(135deg, #18364e, #477383);
+    font-size: 2rem;
+    font-weight: 800;
+}
+
+.doctor-email {
+    margin: 8px 0;
+    color: var(--text-light);
+    font-size: 0.84rem;
+    overflow-wrap: anywhere;
+}
+
+.doctor-email a {
+    color: #286c78;
+    text-decoration: none;
+}
+
+.doctor-email a:hover {
+    text-decoration: underline;
+}
+
+.doctor-directory-message {
+    grid-column: 1 / -1;
+    color: var(--text-light);
+}
+
 .featured-doctor:hover .doctor-photo {
     transform: scale(1.04);
 }
