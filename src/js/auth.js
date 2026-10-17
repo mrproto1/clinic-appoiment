@@ -302,6 +302,19 @@ if (document.getElementById('familySignupForm')) {
                 return;
             }
         } catch (error) {
+            if (/email or username already exists/i.test(error.message || '')) {
+                const loginTab = document.getElementById('family-login-tab');
+                const loginEmail = document.getElementById('username');
+                const loginError = document.getElementById('errorMessage');
+                if (loginEmail) loginEmail.value = signupEmail;
+                if (loginTab) loginTab.click();
+                if (loginError) {
+                    loginError.textContent = 'An account already uses this email. Sign in if it is your family account. If it belongs to the patient, create the family account with your own email and keep the patient email in the patient email field.';
+                    loginError.classList.add('show');
+                }
+                return;
+            }
+
             if (signupMessage) {
                 signupMessage.textContent = error.message;
                 signupMessage.style.color = '#b42318';
