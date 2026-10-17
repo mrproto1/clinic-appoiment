@@ -710,7 +710,10 @@ function find_patient_for_user($user)
         }
     }
 
-    $linkedEmail = strtolower(trim((string)($user['linkedPatientEmail'] ?? $user['email'] ?? '')));
+    $linkedEmail = strtolower(trim((string)($user['linkedPatientEmail'] ?? '')));
+    if ($linkedEmail === '' && ($user['role'] ?? '') !== 'family') {
+        $linkedEmail = strtolower(trim((string)($user['email'] ?? '')));
+    }
     $linkedName = normalize_person_name((string)($user['linkedPatientName'] ?? ''));
 
     if ($linkedEmail !== '') {
@@ -829,6 +832,12 @@ function handle_auth_routes($method, $segments, $body)
                 respond(400, ['error' => 'Doctor accounts need a department']);
             }
         }
+        if ($role === 'family') {
+            $phone = preg_replace('/[\s().-]+/', '', $phone);
+            if (!preg_match('/^\+?[0-9]{7,15}$/', $phone)) {
+                respond(400, ['error' => 'Enter a valid phone number with 7 to 15 digits']);
+            }
+        }
         if (strlen($department) > 100 || strlen($name) > 120 || strlen($username) > 120 || strlen($email) > 160) {
             respond(400, ['error' => 'One or more fields are too long']);
         }
@@ -849,6 +858,7 @@ function handle_auth_routes($method, $segments, $body)
         }
 
         if ($role === 'family') {
+            $matchedPatient = null;
             $linkedPatientEmail = trim((string)($body['patientEmail'] ?? $body['linkedPatientEmail'] ?? ''));
             $linkedPatientName = trim((string)($body['patientName'] ?? $body['linkedPatientName'] ?? ''));
 
@@ -1113,7 +1123,7 @@ function handle_patient_routes($method, $segments, $body)
         }
 
         $matched = find_patient_for_user($user);
-        if (!$matched) {
+        if (!$matched && ($user['role'] ?? '') === 'patient') {
             $patients = read_data('patients');
             $emailKey = strtolower(trim((string)($user['email'] ?? '')));
             $nameKey = normalize_person_name((string)($user['name'] ?? ''));

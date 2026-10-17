@@ -139,7 +139,7 @@ function getFamilyLinkedPatientContext() {
     return {
         patientId: Number(currentUser.linkedPatientId || 0),
         patientName: String(currentUser.linkedPatientName || '').trim().toLowerCase(),
-        patientEmail: String(currentUser.linkedPatientEmail || currentUser.email || '').trim().toLowerCase()
+        patientEmail: String(currentUser.linkedPatientEmail || '').trim().toLowerCase()
     };
 }
 
@@ -225,10 +225,22 @@ function handleWebSocketMessage(data) {
             showNotification(`🚨 Severity: ${data.patientName} is now ${data.severity}!`, 'warning');
             refreshPatientList();
             break;
-        case 'code-blue':
+        case 'code-blue': {
+            const alert = data.alert || {};
+            const familyContext = getFamilyLinkedPatientContext();
+            if (familyContext && !messageMatchesLinkedPatient({
+                metadata: alert.metadata || {
+                    patientId: alert.patientId,
+                    patientName: alert.patientName,
+                    patientEmail: alert.patientEmail
+                }
+            }, familyContext)) {
+                break;
+            }
             showNotification(`🚨 CODE BLUE: ${data.alert.message}`, 'danger');
-            showCodeBlueOverlay(data.alert.message || 'Immediate assistance is required.');
+            showCodeBlueOverlay(alert.message || 'Immediate assistance is required.');
             break;
+        }
         case 'message':
             handleNewMessage(data.message);
             break;

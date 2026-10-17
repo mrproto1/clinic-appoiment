@@ -259,6 +259,7 @@ if (document.getElementById('familySignupForm')) {
         const signupName = document.getElementById('signup-name').value.trim();
         const signupEmail = document.getElementById('signup-email').value.trim();
         const signupPhone = document.getElementById('family-phone').value.trim();
+        const normalizedPhone = signupPhone.replace(/[\s().-]/g, '');
         const signupPassword = document.getElementById('signup-password').value;
         const patientEmail = document.getElementById('linked-patient-email').value.trim();
         const relationship = document.getElementById('relationship').value.trim();
@@ -269,11 +270,15 @@ if (document.getElementById('familySignupForm')) {
             if (signupMessage) signupMessage.textContent = '';
             if (errorDiv) errorDiv.classList.remove('show');
 
+            if (!/^\+?\d{7,15}$/.test(normalizedPhone)) {
+                throw new Error('Enter a valid phone number with 7 to 15 digits.');
+            }
+
             const registration = await registerAccount({
                 username: signupEmail,
                 name: signupName,
                 email: signupEmail,
-                phone: signupPhone,
+                phone: normalizedPhone,
                 password: signupPassword,
                 role: 'family',
                 patientEmail,
