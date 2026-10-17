@@ -9,7 +9,7 @@
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="../js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
-    <script src="../js/appointments.js?v=phone-input-filter-20261017" defer></script>
+    <script src="../js/appointments.js?v=appointment-live-slots-20261017" defer></script>
 </head>
 <body>
     <header>
@@ -52,11 +52,6 @@
                     <label for="appointment-date">Appointment Date:</label>
                     <input type="date" id="appointment-date" name="appointment-date" required>
                 </div>
-                
-                <div class="form-group">
-                    <label for="appointment-time">Appointment Time:</label>
-                    <input type="time" id="appointment-time" name="appointment-time" required>
-                </div>
 
                 <div class="form-group">
                     <label for="doctor-select">Select Doctor:</label>
@@ -81,6 +76,11 @@
                     <div id="availability-slots" class="availability-slots">
                         <p class="muted-text">Choose a doctor and date to view available slots.</p>
                     </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="appointment-time">Appointment Time:</label>
+                    <input type="time" id="appointment-time" name="appointment-time" readonly required>
                 </div>
                 
                 <button type="submit" class="button">Book Appointment</button>

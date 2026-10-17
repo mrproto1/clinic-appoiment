@@ -31,7 +31,7 @@ const API_BASE = resolveApiBase();
 
 function formatDoctorSchedule(doctor) {
     const dept = doctor.department || 'Specialist';
-    return `24-hour booking enabled (00:00-23:59) • ${dept}`;
+    return `Every 30 minutes, 00:00-23:30 • ${dept}`;
 }
 
 function getStoredPatientEmail() {
@@ -58,11 +58,15 @@ async function loadAvailability(doctorId, dateInput, slotContainer, dateLabel, t
         slotContainer.innerHTML = '<p class="muted-text">Availability is unavailable right now.</p>';
         return;
     }
+    if (!response.data.slots.length) {
+        slotContainer.innerHTML = '<p class="muted-text">No future slots are available on this date.</p>';
+        return;
+    }
 
     slotContainer.innerHTML = response.data.slots.map((slot) => `
         <button type="button" class="availability-slot ${slot.available ? '' : 'is-booked'}" ${slot.available ? '' : 'disabled'} data-time="${slot.time}">
             <span>${slot.time}</span>
-            <small>${slot.available ? 'Available' : 'Booked'}</small>
+            <small>${slot.label || (slot.available ? 'Available' : 'Unavailable')}</small>
         </button>
     `).join('');
 

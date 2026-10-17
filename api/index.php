@@ -1695,8 +1695,12 @@ function handle_appointment_routes($method, $segments, $body)
     if ($method === 'GET' && count($segments) === 2 && $segments[1] === 'availability') {
         $doctorId = (int)($_GET['doctorId'] ?? 0);
         $date = trim((string)($_GET['date'] ?? ''));
-        if ($doctorId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        if ($doctorId <= 0 || !valid_iso_date($date)) {
             respond(400, ['error' => 'Doctor and date are required']);
+        }
+        $doctor = find_by_id('users', $doctorId);
+        if (!$doctor || ($doctor['role'] ?? '') !== 'doctor') {
+            respond(404, ['error' => 'Doctor not found']);
         }
 
         $booked = array_values(array_filter(read_data('appointments'), function ($item) use ($doctorId, $date) {
@@ -1708,12 +1712,18 @@ function handle_appointment_routes($method, $segments, $body)
         $approvedLeave = find_approved_doctor_leave($doctorId, $date);
 
         $slots = [];
-        for ($hour = 8; $hour <= 17; $hour++) {
+        for ($hour = 0; $hour <= 23; $hour++) {
             foreach ([0, 30] as $minute) {
                 $slot = sprintf('%02d:%02d', $hour, $minute);
+                if (!is_doctor_schedule_valid($date, $slot, $doctor['department'] ?? 'General Medicine')
+                    || !is_future_appointment_slot($date, $slot)) {
+                    continue;
+                }
+                $isBooked = in_array($slot, $bookedTimes, true);
                 $slots[] = [
                     'time' => $slot,
-                    'available' => !$approvedLeave && !in_array($slot, $bookedTimes, true)
+                    'available' => !$approvedLeave && !$isBooked,
+                    'label' => $approvedLeave ? 'Doctor on leave' : ($isBooked ? 'Booked' : 'Available')
                 ];
             }
         }
@@ -3323,18 +3333,12 @@ function handle_bulletin_routes($method, $segments, $body)
 
 function is_doctor_schedule_valid($date, $time, $department)
 {
-    $timestamp = strtotime($date . ' ' . $time);
-    if ($timestamp === false) {
+    if (!valid_iso_date((string)$date) || !preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', (string)$time)) {
         return false;
     }
 
     $minutes = to_minutes($time);
-    if ($minutes < 0) {
-        return false;
-    }
-
-    // Accept full 24-hour schedule for competition mode: 00:00 through 23:59.
-    return $minutes >= 0 && $minutes <= (23 * 60 + 59);
+    return $minutes >= 0 && $minutes <= (23 * 60 + 30) && $minutes % 30 === 0;
 }
 
 function to_minutes($hhmm)
