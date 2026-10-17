@@ -99,12 +99,15 @@ async function initPublicDoctorDirectory() {
         const doctors = await response.json();
         if (!Array.isArray(doctors)) throw new Error('Unexpected doctor list');
 
-        if (!doctors.length) {
-            container.replaceChildren(Object.assign(document.createElement('p'), { className: 'doctor-directory-message', textContent: 'No doctor accounts are listed yet.' }));
-            return;
-        }
+        const visibleNames = new Set(['muhammadirfan', 'afifwahdi', 'ariffzafrizat']);
+        const additionalDoctors = doctors.filter((doctor) => {
+            const normalizedName = String(doctor.name || '').toLowerCase().replace(/^dr\.?\s*/, '').replace(/[^a-z0-9]/g, '');
+            if (!normalizedName || visibleNames.has(normalizedName)) return false;
+            visibleNames.add(normalizedName);
+            return true;
+        });
 
-        const cards = doctors.map((doctor, index) => {
+        const cards = additionalDoctors.map((doctor, index) => {
             const card = document.createElement('article');
             card.className = 'doctor-card featured-doctor';
 
@@ -156,11 +159,10 @@ async function initPublicDoctorDirectory() {
             card.style.setProperty('--reveal-delay', `${Math.min(index * 60, 360)}ms`);
             return card;
         });
-        container.replaceChildren(...cards);
+        container.append(...cards);
         container.classList.add('doctors-grid');
     } catch (error) {
         console.error('Error loading doctor directory:', error);
-        container.replaceChildren(Object.assign(document.createElement('p'), { className: 'doctor-directory-message', textContent: 'Doctor directory is temporarily unavailable. Please try again later.' }));
     }
 }
 

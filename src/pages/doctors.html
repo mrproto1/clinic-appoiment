@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Doctors - Clinic Appointment System</title>
-    <link rel="stylesheet" href="../css/styles.css?v=doctor-account-photos-20261017">
+    <link rel="stylesheet" href="../css/styles.css?v=doctor-pinned-cards-20261017">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
@@ -27,13 +27,51 @@
             <p>Our experienced and qualified doctors are dedicated to providing you with the best healthcare.</p>
             
             <div id="doctor-directory" class="doctors-grid" aria-live="polite">
-                <p class="muted-text">Loading registered doctors...</p>
+                <article class="doctor-card reveal-on-scroll featured-doctor" style="--reveal-delay: 260ms;">
+                    <div class="doctor-media">
+                        <img src="../images/me-cap.png" alt="Dr. Muhammad Irfan" class="doctor-photo">
+                    </div>
+                    <div class="doctor-header">
+                        <h3>Dr. Muhammad Irfan</h3>
+                        <span class="specialty">Cardiology</span>
+                    </div>
+                    <p class="qualification">MBBS, MRCP (UK), Institute of Cardiology - Imperial College London</p>
+                    <p class="experience">10+ years of experience, including 2 years of cardiology service in Turkey</p>
+                    <p class="availability"><strong>Availability:</strong> Mon-Fri, 9 AM - 5 PM</p>
+                    <p class="bio">Specialist in interventional cardiology, acute coronary care, and long-term cardiovascular risk management.</p>
+                    <a href="appointments.html" class="button" style="display: inline-block; margin-top: 10px;">Book Appointment</a>
+                </article>
+                <article class="doctor-card reveal-on-scroll featured-doctor" style="--reveal-delay: 340ms;">
+                    <div class="doctor-media">
+                        <img src="../images/doctor-afif-wahdi.png" alt="Dr. Afif Wahdi" class="doctor-photo">
+                    </div>
+                    <div class="doctor-header">
+                        <h3>Dr. Afif Wahdi</h3>
+                        <span class="specialty">Psychiatrist</span>
+                    </div>
+                    <p class="qualification">MBBS, MMed Psychiatry, Fellowship in Clinical Psychiatry</p>
+                    <p class="experience">12+ years of psychiatric and mental healthcare experience</p>
+                    <p class="availability"><strong>Availability:</strong> Mon-Fri, 9 AM - 5 PM</p>
+                    <p class="bio">Provides compassionate assessment and treatment for mood, anxiety, stress-related, and other mental health conditions.</p>
+                    <a href="appointments.html" class="button" style="display: inline-block; margin-top: 10px;">Book Appointment</a>
+                </article>
+                <article class="doctor-card reveal-on-scroll featured-doctor" style="--reveal-delay: 420ms;">
+                    <div class="doctor-media">
+                        <div class="doctor-photo-placeholder" aria-hidden="true">AZ</div>
+                    </div>
+                    <div class="doctor-header">
+                        <h3>Dr. Ariff Zafrizat</h3>
+                        <span class="specialty">Department not listed</span>
+                    </div>
+                    <p class="doctor-email">Contact the hospital for appointment support.</p>
+                    <a href="appointments.html" class="button" style="display: inline-block; margin-top: 10px;">Book Appointment</a>
+                </article>
             </div>
         </section>
     </main>
     <footer>
         <p>&copy; 2026 Clinic Appointment System. All rights reserved.</p>
     </footer>
-    <script src="../js/app.js?v=doctor-account-photos-20261017"></script>
+    <script src="../js/app.js?v=doctor-pinned-cards-20261017"></script>
 </body>
 </html>
