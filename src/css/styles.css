@@ -2189,7 +2189,6 @@ html {
     transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-.protocol-top-nav a.active,
 .protocol-top-nav a:hover {
     opacity: 0.9;
     transform: translateY(-1px);
@@ -5870,12 +5869,6 @@ body.dashboard [hidden] {
 .protocol-nav-group > summary:focus-visible {
     background: rgba(255, 255, 255, 0.24);
     border-color: rgba(255, 255, 255, 0.48);
-}
-
-.protocol-top-nav > a.active {
-    color: #10233f;
-    background: #f1c46f;
-    border-color: #f1c46f;
 }
 
 .protocol-nav-group {
