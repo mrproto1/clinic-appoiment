@@ -253,6 +253,13 @@ if (document.getElementById('loginForm')) {
 }
 
 if (document.getElementById('familySignupForm')) {
+    const familyPhoneInput = document.getElementById('family-phone');
+    familyPhoneInput.addEventListener('input', () => {
+        const hasLeadingPlus = familyPhoneInput.value.trimStart().startsWith('+');
+        const digits = familyPhoneInput.value.replace(/\D/g, '').slice(0, 15);
+        familyPhoneInput.value = `${hasLeadingPlus ? '+' : ''}${digits}`;
+    });
+
     document.getElementById('familySignupForm').addEventListener('submit', async (e) => {
         e.preventDefault();
 

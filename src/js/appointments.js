@@ -151,8 +151,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const availabilityDateLabel = document.getElementById('availability-date-label');
     const status = document.getElementById('appointment-form-status');
     const emailInput = document.getElementById('patient-email');
+    const phoneInput = document.getElementById('patient-phone');
 
     if (!form || !doctorSelect || !dateInput || !status || !emailInput) return;
+
+    phoneInput.addEventListener('input', () => {
+        const hasLeadingPlus = phoneInput.value.trimStart().startsWith('+');
+        const digits = phoneInput.value.replace(/\D/g, '').slice(0, 15);
+        phoneInput.value = `${hasLeadingPlus ? '+' : ''}${digits}`;
+    });
 
     dateInput.min = new Date().toISOString().split('T')[0];
     emailInput.value = getStoredPatientEmail();

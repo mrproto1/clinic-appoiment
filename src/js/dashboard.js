@@ -4605,6 +4605,13 @@ function setupStaffPatientForm() {
     const categorySelect = document.getElementById('new-patient-category');
     if (!form) return;
 
+    const patientPhoneInput = document.getElementById('new-patient-phone');
+    patientPhoneInput.addEventListener('input', () => {
+        const hasLeadingPlus = patientPhoneInput.value.trimStart().startsWith('+');
+        const digits = patientPhoneInput.value.replace(/\D/g, '').slice(0, 15);
+        patientPhoneInput.value = `${hasLeadingPlus ? '+' : ''}${digits}`;
+    });
+
     if (categorySelect) {
         categorySelect.addEventListener('change', populateDoctorSelect);
     }
