@@ -623,12 +623,9 @@ function updateDashboardHero(name, role) {
 
 // Show sections based on user role
 function showRoleBasedSections(role) {
-    const sections = document.querySelectorAll('.content-section');
-    sections.forEach(section => section.classList.remove('active'));
-
     const roleSection = document.getElementById(`${role}-section`);
     if (roleSection) {
-        roleSection.classList.add('active');
+        switchSection(roleSection.id);
     }
 }
 

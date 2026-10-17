@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=doctor-emergency-actions-20261017">
+    <link rel="stylesheet" href="css/styles.css?v=home-nav-dashboard-active-20261017">
     <script>
         window.__APP_API_BASE__ = 'https://clinic-appoiment-production.up.railway.app/api';
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=family-access-validation-20261017" defer></script>
-    <script src="js/dashboard.js?v=doctor-emergency-appointment-actions-20261017" defer></script>
+    <script src="js/dashboard.js?v=home-nav-dashboard-active-20261017" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -1079,8 +1079,31 @@
 
         // Switch content section
         function switchSection(sectionId) {
-            document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
-            document.getElementById(sectionId).classList.add('active');
+            const section = document.getElementById(sectionId);
+            if (!section) return;
+
+            document.querySelectorAll('.content-section').forEach((item) => {
+                item.classList.toggle('active', item === section);
+            });
+
+            const navSectionId = sectionId === 'doctor-patients-section' ? 'doctor-section' : sectionId;
+            const activeLink = [...document.querySelectorAll('.sidebar .nav-link')].find((link) => {
+                if (link.closest('li')?.style.display === 'none') return false;
+                const handler = link.getAttribute('onclick') || '';
+                return handler.includes(`switchSection('${navSectionId}')`)
+                    || (sectionId === 'patient-messages-section' && handler.includes('openPatientMessages'));
+            });
+
+            document.querySelectorAll('.sidebar .nav-link').forEach((link) => {
+                const isActive = link === activeLink;
+                link.classList.toggle('active', isActive);
+                if (isActive) link.setAttribute('aria-current', 'page');
+                else link.removeAttribute('aria-current');
+            });
+
+            const sectionName = document.getElementById('dashboard-section-name');
+            const heading = section.querySelector('h1');
+            if (sectionName && heading) sectionName.textContent = heading.textContent.trim();
         }
 
         // Modal functions
