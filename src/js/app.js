@@ -99,10 +99,18 @@ async function initPublicDoctorDirectory() {
         const doctors = await response.json();
         if (!Array.isArray(doctors)) throw new Error('Unexpected doctor list');
 
-        const visibleNames = new Set(['muhammadirfan', 'afifwahdi', 'ariffzafrizat']);
+        const visibleNames = new Set([
+            'muhammadirfan',
+            'afifwahdi',
+            'muhammadhazim',
+            'hadimirza',
+            'aimishaffiq',
+            'helmizareef'
+        ]);
         const additionalDoctors = doctors.filter((doctor) => {
             const normalizedName = String(doctor.name || '').toLowerCase().replace(/^dr\.?\s*/, '').replace(/[^a-z0-9]/g, '');
-            if (!normalizedName || visibleNames.has(normalizedName)) return false;
+            const email = String(doctor.email || '').toLowerCase();
+            if (!normalizedName || email.endsWith('.test') || visibleNames.has(normalizedName)) return false;
             visibleNames.add(normalizedName);
             return true;
         });
