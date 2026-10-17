@@ -2506,8 +2506,10 @@ html {
 }
 
 .protocol-history-section {
-    width: min(1180px, calc(100% - 48px));
-    margin: 48px auto 0;
+    width: 100%;
+    margin: 48px 0 0;
+    padding: 48px max(24px, calc((100% - 1180px) / 2));
+    background: #e8f0ed;
 }
 
 .protocol-section-heading {
@@ -2919,6 +2921,10 @@ html {
 }
 
 @media (max-width: 760px) {
+    .protocol-history-section {
+        padding: 36px 24px;
+    }
+
     .protocol-history-grid,
     .protocol-values-section {
         grid-template-columns: 1fr;
@@ -2969,7 +2975,7 @@ html {
 
 @media (max-width: 420px) {
     .protocol-history-section {
-        width: calc(100% - 32px);
+        padding: 32px 16px;
     }
 
     .protocol-section-heading h2,
