@@ -414,9 +414,8 @@ label {
     display: block;
     width: 100%;
     height: 260px;
-    object-fit: contain;
-    object-position: center;
-    background: #edf2f3;
+    object-fit: cover;
+    object-position: center 20%;
     transition: transform 0.35s ease;
 }
 
