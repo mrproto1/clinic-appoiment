@@ -110,7 +110,7 @@ async function initPublicDoctorDirectory() {
         const additionalDoctors = doctors.filter((doctor) => {
             const normalizedName = String(doctor.name || '').toLowerCase().replace(/^dr\.?\s*/, '').replace(/[^a-z0-9]/g, '');
             const email = String(doctor.email || '').toLowerCase();
-            if (!normalizedName || email.endsWith('.test') || visibleNames.has(normalizedName)) return false;
+            if (!normalizedName || normalizedName === 'ariffzafrizat' || email.endsWith('.test') || visibleNames.has(normalizedName)) return false;
             visibleNames.add(normalizedName);
             return true;
         });
