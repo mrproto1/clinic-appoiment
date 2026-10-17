@@ -4640,6 +4640,14 @@ function setupStaffPatientForm() {
             return;
         }
 
+        if (payload.phone) {
+            payload.phone = payload.phone.replace(/[\s().-]/g, '');
+            if (!/^\+?\d{7,15}$/.test(payload.phone)) {
+                if (status) status.textContent = 'Enter a valid patient phone number with 7 to 15 digits.';
+                return;
+            }
+        }
+
         try {
             const response = await apiCall('/patients', {
                 method: 'POST',

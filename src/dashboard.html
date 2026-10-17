@@ -10,7 +10,7 @@
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=family-access-validation-20261017" defer></script>
-    <script src="js/dashboard.js?v=family-appointment-details-20261017" defer></script>
+    <script src="js/dashboard.js?v=patient-phone-validation-20261017" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -454,7 +454,7 @@
                         </div>
                         <div class="form-group">
                             <label for="new-patient-phone">Phone</label>
-                            <input type="tel" id="new-patient-phone" placeholder="0123456789">
+                            <input type="tel" id="new-patient-phone" inputmode="tel" maxlength="16" pattern="(?:[0-9]{7,15}|\+[0-9]{7,15})" title="Enter 7 to 15 digits, optionally preceded by +." placeholder="0123456789">
                         </div>
                         <div class="form-group">
                             <label for="new-patient-email">Email</label>

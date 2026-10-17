@@ -1206,9 +1206,16 @@ function handle_patient_routes($method, $segments, $body)
         $sicknessCategory = trim((string)($body['sicknessCategory'] ?? 'General Medicine'));
         $severity = trim((string)($body['severity'] ?? 'Moderate'));
         $assignedDoctorId = isset($body['assignedDoctor']) ? (int)$body['assignedDoctor'] : 0;
+        $patientPhone = trim((string)($body['phone'] ?? ''));
 
         if ($name === '' || $patientCode === '' || $diagnosis === '' || $severity === '' || $assignedDoctorId <= 0) {
             respond(400, ['error' => 'Missing required fields (doctor assignment is required)']);
+        }
+        if ($patientPhone !== '') {
+            $patientPhone = preg_replace('/[\s().-]+/', '', $patientPhone);
+            if (!preg_match('/^\+?[0-9]{7,15}$/', $patientPhone)) {
+                respond(400, ['error' => 'Enter a valid patient phone number with 7 to 15 digits']);
+            }
         }
 
         $allowedSeverity = ['Critical', 'Severe', 'Moderate', 'Mild'];
@@ -1227,7 +1234,7 @@ function handle_patient_routes($method, $segments, $body)
             'age' => $body['age'] ?? null,
             'gender' => $body['gender'] ?? null,
             'bloodType' => $body['bloodType'] ?? null,
-            'phone' => $body['phone'] ?? null,
+            'phone' => $patientPhone !== '' ? $patientPhone : null,
             'email' => $body['email'] ?? null,
             'address' => $body['address'] ?? null,
             'diagnosis' => $diagnosis,
@@ -1742,13 +1749,16 @@ function handle_appointment_routes($method, $segments, $body)
     if ($method === 'POST' && count($segments) === 1) {
         $patientName = trim((string)($body['patientName'] ?? ''));
         $patientEmail = trim((string)($body['patientEmail'] ?? ''));
-        $patientPhone = trim((string)($body['patientPhone'] ?? ''));
+        $patientPhone = preg_replace('/[\s().-]+/', '', trim((string)($body['patientPhone'] ?? '')));
         $date = trim((string)($body['date'] ?? ''));
         $time = trim((string)($body['time'] ?? ''));
         $doctorId = isset($body['doctorId']) ? (int)$body['doctorId'] : 0;
 
         if ($patientName === '' || $patientEmail === '' || $patientPhone === '' || $date === '' || $time === '' || $doctorId <= 0) {
             respond(400, ['error' => 'Missing required appointment fields']);
+        }
+        if (!preg_match('/^\+?[0-9]{7,15}$/', $patientPhone)) {
+            respond(400, ['error' => 'Enter a valid phone number with 7 to 15 digits']);
         }
 
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !preg_match('/^\d{2}:\d{2}$/', $time)) {

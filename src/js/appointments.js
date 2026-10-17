@@ -210,10 +210,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
+        const patientPhone = document.getElementById('patient-phone').value.trim().replace(/[\s().-]/g, '');
         const payload = {
             patientName: document.getElementById('patient-name').value.trim(),
             patientEmail: emailInput.value.trim(),
-            patientPhone: document.getElementById('patient-phone').value.trim(),
+            patientPhone,
             date: dateInput.value,
             time: document.getElementById('appointment-time').value,
             doctorId: Number(doctorSelect.value)
@@ -221,6 +222,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (!payload.patientName || !payload.patientEmail || !payload.patientPhone || !payload.date || !payload.time || !payload.doctorId) {
             status.textContent = 'Please complete all appointment fields.';
+            return;
+        }
+        if (!/^\+?\d{7,15}$/.test(payload.patientPhone)) {
+            status.textContent = 'Enter a valid phone number with 7 to 15 digits.';
             return;
         }
 
