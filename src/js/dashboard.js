@@ -683,6 +683,9 @@ function displayDoctorAppointments(appointments, doctorProfile) {
     }
 
     const sorted = [...appointments].sort((a, b) => (`${a.date} ${a.time}`).localeCompare(`${b.date} ${b.time}`));
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+    }[character]));
     container.innerHTML = `
         <p class="muted-text">${doctorProfile.name} • ${doctorProfile.department || 'Specialist'}</p>
         <table>
@@ -693,20 +696,38 @@ function displayDoctorAppointments(appointments, doctorProfile) {
                     <th>Patient</th>
                     <th>Phone</th>
                     <th>Status</th>
-                    <th>Action</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                ${sorted.map((item) => `
-                    <tr>
-                        <td>${item.date}</td>
-                        <td>${item.time}</td>
-                        <td>${item.patientName}</td>
-                        <td>${item.patientPhone}</td>
-                        <td>${item.status || 'Scheduled'}</td>
-                        <td><button class="btn btn-small btn-danger" onclick="deleteDoctorAppointment(${item.id})">Delete</button></td>
-                    </tr>
-                `).join('')}
+                ${sorted.map((item) => {
+                    const active = !['Cancelled', 'Completed'].includes(item.status || 'Scheduled');
+                    const replacementOptions = doctorDirectory
+                        .filter((doctor) => Number(doctor.id) !== Number(item.doctorId))
+                        .map((doctor) => `<option value="${Number(doctor.id)}">${escapeHtml(doctor.name)} (${escapeHtml(doctor.department || 'Specialist')})</option>`)
+                        .join('');
+                    return `
+                        <tr>
+                            <td>${escapeHtml(item.date)}</td>
+                            <td>${escapeHtml(item.time)}</td>
+                            <td>${escapeHtml(item.patientName)}</td>
+                            <td>${escapeHtml(item.patientPhone)}</td>
+                            <td>${escapeHtml(item.status || 'Scheduled')}</td>
+                            <td>
+                                ${active ? `<div class="doctor-appointment-actions">
+                                    <button class="btn btn-small btn-danger" onclick="cancelDoctorAppointment(${Number(item.id)})">Cancel &amp; notify</button>
+                                    <div class="doctor-reassign-controls">
+                                        <select id="replacement-doctor-${Number(item.id)}" aria-label="Choose replacement doctor for ${escapeHtml(item.patientName)}">
+                                            <option value="">Choose replacement doctor</option>
+                                            ${replacementOptions}
+                                        </select>
+                                        <button class="btn btn-small btn-secondary" onclick="reassignDoctorAppointment(${Number(item.id)})">Reassign</button>
+                                    </div>
+                                </div>` : '<span class="muted-text">No actions</span>'}
+                            </td>
+                        </tr>
+                    `;
+                }).join('')}
             </tbody>
         </table>
     `;
@@ -845,26 +866,64 @@ async function submitDoctorLeave(event) {
     }
 }
 
-async function deleteDoctorAppointment(appointmentId) {
-    const confirmed = window.confirm('Delete this appointment from your doctor list?');
-    if (!confirmed) return;
+async function cancelDoctorAppointment(appointmentId) {
+    const reason = window.prompt('Reason for cancelling this appointment (required):');
+    if (reason === null) return;
+    if (!reason.trim()) {
+        showNotification('A cancellation reason is required.', 'warning');
+        return;
+    }
 
     try {
         const response = await apiCall(`/appointments/${appointmentId}`, {
-            method: 'DELETE'
+            method: 'PUT',
+            body: JSON.stringify({ action: 'doctor-cancel', reason: reason.trim() })
         });
+        const result = response ? await response.json().catch(() => ({})) : {};
 
         if (response && response.ok) {
-            showNotification('Appointment deleted successfully.', 'success');
-            loadDoctorDashboard();
+            showNotification(result.message || 'Appointment cancelled and patient/family notified.', 'success');
+            await loadDoctorDashboard();
             return;
         }
 
-        const errorData = response ? await response.json().catch(() => ({})) : {};
-        showNotification(errorData.error || 'Unable to delete appointment.', 'danger');
+        showNotification(result.error || 'Unable to cancel appointment.', 'danger');
     } catch (error) {
-        console.error('Error deleting appointment:', error);
-        showNotification('Unable to delete appointment right now.', 'danger');
+        console.error('Error cancelling appointment:', error);
+        showNotification('Unable to cancel appointment right now.', 'danger');
+    }
+}
+
+async function reassignDoctorAppointment(appointmentId) {
+    const select = document.getElementById(`replacement-doctor-${appointmentId}`);
+    const doctorId = Number(select?.value || 0);
+    if (!doctorId) {
+        showNotification('Choose a replacement doctor first.', 'warning');
+        return;
+    }
+
+    const reason = window.prompt('Reason for reassigning this appointment (required):');
+    if (reason === null) return;
+    if (!reason.trim()) {
+        showNotification('A reassignment reason is required.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await apiCall(`/appointments/${appointmentId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ action: 'reassign-doctor', doctorId, reason: reason.trim() })
+        });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to reassign appointment.', 'danger');
+            return;
+        }
+        showNotification(result.message || 'Appointment reassigned and patient/family notified.', 'success');
+        await loadDoctorDashboard();
+    } catch (error) {
+        console.error('Error reassigning appointment:', error);
+        showNotification('Unable to reassign appointment right now.', 'danger');
     }
 }
 
@@ -2802,7 +2861,12 @@ function buildAppointmentActionCard(appointment) {
 
     if (appointment.status === 'Reschedule Requested' && appointment.rescheduleRequest) {
         card.append(clinicalEl('p', 'appointment-reschedule-note', `Requested: ${appointment.rescheduleRequest.date} · ${appointment.rescheduleRequest.time}${appointment.rescheduleRequest.note ? ` — ${appointment.rescheduleRequest.note}` : ''}`));
+    } else if (appointment.status === 'Cancelled') {
+        card.append(clinicalEl('p', 'appointment-reschedule-note', `Cancelled by ${appointment.cancelledBy || 'the care team'}${appointment.cancellationReason ? `: ${appointment.cancellationReason}` : '.'}`));
     } else if (['Scheduled', 'Confirmed'].includes(appointment.status || 'Scheduled')) {
+        if (appointment.doctorReassignment) {
+            card.append(clinicalEl('p', 'appointment-reschedule-note', `Reassigned from ${appointment.doctorReassignment.fromDoctorName || 'another doctor'}: ${appointment.doctorReassignment.reason || 'care team update'}`));
+        }
         const actions = clinicalEl('div', 'clinical-actions');
         if (appointment.status !== 'Confirmed') {
             const confirm = clinicalEl('button', 'btn btn-small btn-success', 'Confirm appointment');

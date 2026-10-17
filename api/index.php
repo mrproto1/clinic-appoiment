@@ -1704,7 +1704,9 @@ function handle_appointment_routes($method, $segments, $body)
         }
 
         $booked = array_values(array_filter(read_data('appointments'), function ($item) use ($doctorId, $date) {
-            return (int)($item['doctorId'] ?? 0) === $doctorId && ($item['date'] ?? '') === $date;
+            return (int)($item['doctorId'] ?? 0) === $doctorId
+                && ($item['date'] ?? '') === $date
+                && ($item['status'] ?? 'Scheduled') !== 'Cancelled';
         }));
         $bookedTimes = array_values(array_unique(array_map(function ($item) {
             return (string)($item['time'] ?? '');
@@ -1796,7 +1798,10 @@ function handle_appointment_routes($method, $segments, $body)
 
         $appointments = read_data('appointments');
         foreach ($appointments as $item) {
-            if ((int)($item['doctorId'] ?? 0) === $doctorId && ($item['date'] ?? '') === $date && ($item['time'] ?? '') === $time) {
+            if (($item['status'] ?? 'Scheduled') !== 'Cancelled'
+                && (int)($item['doctorId'] ?? 0) === $doctorId
+                && ($item['date'] ?? '') === $date
+                && ($item['time'] ?? '') === $time) {
                 respond(409, ['error' => 'Doctor already has an appointment at this time']);
             }
         }
@@ -1868,7 +1873,7 @@ function handle_appointment_routes($method, $segments, $body)
     }
 
     if ($method === 'DELETE' && count($segments) === 2 && is_numeric($segments[1])) {
-        $user = require_auth(['doctor', 'staff', 'admin']);
+        $user = require_auth(['staff', 'admin']);
         $appointmentId = (int)$segments[1];
         $appointment = find_by_id('appointments', $appointmentId);
 
@@ -1899,6 +1904,106 @@ function handle_appointment_routes($method, $segments, $body)
         if (!$appointment) respond(404, ['error' => 'Appointment not found']);
 
         $action = trim((string)($body['action'] ?? ''));
+        if ($action === 'doctor-cancel') {
+            if (!in_array($user['role'], ['doctor', 'staff', 'admin'], true)) {
+                respond(403, ['error' => 'Only the care team can cancel this appointment']);
+            }
+            if ($user['role'] === 'doctor' && !in_array((int)($appointment['doctorId'] ?? 0), get_doctor_alias_ids((int)$user['id']), true)) {
+                respond(403, ['error' => 'Only the assigned doctor can cancel this appointment']);
+            }
+            if (in_array(($appointment['status'] ?? ''), ['Cancelled', 'Completed'], true)) {
+                respond(409, ['error' => 'This appointment can no longer be cancelled']);
+            }
+
+            $reason = clinical_text($body['reason'] ?? '', 240, true);
+            if ($reason === null) respond(400, ['error' => 'A cancellation reason is required (maximum 240 characters)']);
+
+            $cancelledBy = (string)($user['name'] ?? 'Care team');
+            $updated = update_row('appointments', $appointmentId, [
+                'status' => 'Cancelled',
+                'cancellationReason' => $reason,
+                'cancelledBy' => $cancelledBy,
+                'cancelledAt' => gmdate('c')
+            ]);
+            $doctorName = (string)($appointment['doctorName'] ?? 'the doctor');
+            $message = 'Your appointment with ' . $doctorName . ' on ' . ($appointment['date'] ?? '') . ' at ' . ($appointment['time'] ?? '') . ' was cancelled. Reason: ' . $reason;
+            notify_appointment_contacts($appointment, 'appointment-cancelled', 'Appointment cancelled', $message, ['appointmentId' => $appointmentId]);
+            audit_event($user, 'appointment-cancelled', 'appointment', $appointmentId, ['appointmentId' => $appointmentId, 'reason' => $reason]);
+            respond(200, ['message' => 'Appointment cancelled and patient/family notified', 'appointment' => $updated]);
+        }
+
+        if ($action === 'reassign-doctor') {
+            if (!in_array($user['role'], ['doctor', 'staff', 'admin'], true)) {
+                respond(403, ['error' => 'Only the care team can reassign this appointment']);
+            }
+            if ($user['role'] === 'doctor' && !in_array((int)($appointment['doctorId'] ?? 0), get_doctor_alias_ids((int)$user['id']), true)) {
+                respond(403, ['error' => 'Only the assigned doctor can reassign this appointment']);
+            }
+            if (in_array(($appointment['status'] ?? ''), ['Cancelled', 'Completed'], true)) {
+                respond(409, ['error' => 'This appointment can no longer be reassigned']);
+            }
+
+            $reason = clinical_text($body['reason'] ?? '', 240, true);
+            $replacementId = (int)($body['doctorId'] ?? 0);
+            $replacement = $replacementId > 0 ? find_by_id('users', $replacementId) : null;
+            if ($reason === null) respond(400, ['error' => 'A reassignment reason is required (maximum 240 characters)']);
+            if (!$replacement || ($replacement['role'] ?? '') !== 'doctor') {
+                respond(400, ['error' => 'Select a valid replacement doctor']);
+            }
+
+            $replacement = get_canonical_doctor($replacement);
+            $replacementId = (int)$replacement['id'];
+            if ($replacementId === (int)($appointment['doctorId'] ?? 0)) {
+                respond(400, ['error' => 'Choose a different replacement doctor']);
+            }
+
+            $date = (string)($appointment['date'] ?? '');
+            $time = (string)($appointment['time'] ?? '');
+            $department = (string)($replacement['department'] ?? 'General Medicine');
+            if (!is_future_appointment_slot($date, $time)
+                || !is_doctor_schedule_valid($date, $time, $department)
+                || find_approved_doctor_leave($replacementId, $date)) {
+                respond(409, ['error' => 'The replacement doctor is outside schedule or on approved leave at this time']);
+            }
+
+            foreach (read_data('appointments') as $other) {
+                if ((int)($other['id'] ?? 0) !== $appointmentId
+                    && (int)($other['doctorId'] ?? 0) === $replacementId
+                    && ($other['date'] ?? '') === $date
+                    && ($other['time'] ?? '') === $time
+                    && ($other['status'] ?? '') !== 'Cancelled') {
+                    respond(409, ['error' => 'The replacement doctor already has an appointment at this time']);
+                }
+            }
+
+            $previousDoctorName = (string)($appointment['doctorName'] ?? 'Doctor');
+            $replacementName = (string)($replacement['name'] ?? 'Doctor');
+            $reassignment = [
+                'fromDoctorId' => (int)($appointment['doctorId'] ?? 0),
+                'fromDoctorName' => $previousDoctorName,
+                'toDoctorId' => $replacementId,
+                'toDoctorName' => $replacementName,
+                'reason' => $reason,
+                'changedBy' => (string)($user['name'] ?? 'Care team'),
+                'changedAt' => gmdate('c')
+            ];
+            $updated = update_row('appointments', $appointmentId, [
+                'doctorId' => $replacementId,
+                'doctorName' => $replacementName,
+                'doctorDepartment' => $department,
+                'status' => 'Scheduled',
+                'confirmedBy' => null,
+                'confirmedAt' => null,
+                'rescheduleRequest' => null,
+                'doctorReassignment' => $reassignment
+            ]);
+            create_user_notification($replacementId, 'appointment-reassigned', 'Appointment assigned', 'An appointment was reassigned to you for ' . $date . ' at ' . $time . '.', ['appointmentId' => $appointmentId]);
+            $message = 'Your appointment on ' . $date . ' at ' . $time . ' has been reassigned from ' . $previousDoctorName . ' to ' . $replacementName . '. Reason: ' . $reason;
+            notify_appointment_contacts($appointment, 'appointment-reassigned', 'Doctor changed for your appointment', $message, ['appointmentId' => $appointmentId, 'doctorId' => $replacementId]);
+            audit_event($user, 'appointment-reassigned', 'appointment', $appointmentId, ['appointmentId' => $appointmentId, 'fromDoctorId' => $reassignment['fromDoctorId'], 'toDoctorId' => $replacementId, 'reason' => $reason]);
+            respond(200, ['message' => 'Appointment reassigned and patient/family notified', 'appointment' => $updated]);
+        }
+
         if (in_array($action, ['confirm', 'request-reschedule'], true)) {
             if (!in_array($user['role'], ['patient', 'family'], true) || !appointment_belongs_to_user($appointment, $user)) {
                 respond(403, ['error' => 'Only the booked patient or their linked family account can confirm or request a reschedule']);
@@ -3031,6 +3136,25 @@ function appointment_belongs_to_user($appointment, $user)
         return $patient && strtolower(trim((string)($appointment['patientEmail'] ?? ''))) === strtolower(trim((string)($patient['email'] ?? '')));
     }
     return false;
+}
+
+function notify_appointment_contacts($appointment, $type, $title, $message, $metadata = [])
+{
+    $patientEmail = (string)($appointment['patientEmail'] ?? '');
+    $patient = find_patient_by_email($patientEmail);
+    if ($patient) {
+        notify_patient_contacts($patient, $type, $title, $message, $metadata);
+        return;
+    }
+
+    $normalizedEmail = strtolower(trim($patientEmail));
+    if ($normalizedEmail === '') return;
+    foreach (read_data('users') as $candidate) {
+        if (($candidate['role'] ?? '') === 'patient'
+            && strtolower(trim((string)($candidate['email'] ?? ''))) === $normalizedEmail) {
+            create_user_notification((int)$candidate['id'], $type, $title, $message, $metadata);
+        }
+    }
 }
 
 function find_patient_by_email($email)

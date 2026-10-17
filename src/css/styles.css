@@ -457,6 +457,24 @@ label {
     color: var(--text-light);
 }
 
+.doctor-appointment-actions {
+    display: grid;
+    gap: 8px;
+    min-width: 230px;
+}
+
+.doctor-reassign-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+}
+
+.doctor-reassign-controls select {
+    min-width: 0;
+    max-width: 280px;
+}
+
 .featured-doctor:hover .doctor-photo {
     transform: none;
 }
@@ -2921,6 +2939,14 @@ html {
 }
 
 @media (max-width: 760px) {
+    .doctor-appointment-actions {
+        min-width: 190px;
+    }
+
+    .doctor-reassign-controls {
+        grid-template-columns: 1fr;
+    }
+
     .protocol-history-section {
         padding: 36px 24px;
     }
