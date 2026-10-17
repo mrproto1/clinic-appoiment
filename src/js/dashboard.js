@@ -2790,8 +2790,13 @@ function buildAppointmentActionCard(appointment) {
     const card = clinicalEl('article', 'family-appointment-card');
     const heading = clinicalEl('div', 'family-appointment-heading');
     const details = clinicalEl('div');
+    const appointmentDateTime = [appointment.date, appointment.time].filter(Boolean).join(' · ');
+    details.append(clinicalEl('span', 'appointment-detail-label', 'Doctor'));
     details.append(clinicalEl('strong', '', appointment.doctorName || getDoctorLabel(appointment.doctorId)));
-    details.append(clinicalEl('p', 'muted-text', `${appointment.date || ''} · ${appointment.time || ''} · ${appointment.doctorDepartment || ''}`));
+    details.append(clinicalEl('p', 'muted-text', `Appointment time: ${appointmentDateTime || 'Not set'}`));
+    if (appointment.doctorDepartment) {
+        details.append(clinicalEl('p', 'muted-text', `Department: ${appointment.doctorDepartment}`));
+    }
     heading.append(details, clinicalEl('span', `clinical-status is-${String(appointment.status || 'Scheduled').toLowerCase().replace(/\s+/g, '-')}`, appointment.status || 'Scheduled'));
     card.append(heading);
 
@@ -2839,7 +2844,7 @@ async function loadFamilyAppointments() {
         const appointments = await response.json();
         container.replaceChildren(...(appointments.length
             ? appointments.map(buildAppointmentActionCard)
-            : [clinicalEl('p', 'muted-text', 'No appointments are linked to this family account.')]));
+            : [clinicalEl('p', 'muted-text', 'Appointments for the linked patient will appear here after booking.')]));
     } catch (error) {
         container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load appointments.'));
     }
