@@ -446,6 +446,12 @@ label {
     text-decoration: underline;
 }
 
+.doctor-appointment-link[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
 .doctor-directory-message {
     grid-column: 1 / -1;
     color: var(--text-light);

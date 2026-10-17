@@ -183,6 +183,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadAvailability(doctorSelect.value, dateInput, availabilitySlots, availabilityDateLabel, timeInput);
     });
 
+    const requestedDoctorId = new URLSearchParams(window.location.search).get('doctorId');
+    if (requestedDoctorId && doctorsById.has(Number(requestedDoctorId))) {
+        doctorSelect.value = String(Number(requestedDoctorId));
+        doctorSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
     async function refreshAppointments() {
         const encodedEmail = encodeURIComponent(emailInput.value.trim());
         const endpoint = encodedEmail ? `/appointments?patientEmail=${encodedEmail}` : '/appointments';

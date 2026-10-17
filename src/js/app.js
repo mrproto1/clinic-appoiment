@@ -92,12 +92,28 @@ async function initPublicDoctorDirectory() {
         helmizareef: 'Helmi.png'
     };
     const initialsFor = (name) => String(name || 'Doctor').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0].toUpperCase()).join('');
+    const normalizeDoctorName = (name) => String(name || '').toLowerCase().replace(/^dr\.?\s*/, '').replace(/[^a-z0-9]/g, '');
 
     try {
         const response = await fetch(`${getLocalApiBase()}/users/role/doctor`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const doctors = await response.json();
         if (!Array.isArray(doctors)) throw new Error('Unexpected doctor list');
+
+        const doctorsByName = new Map(doctors.map((doctor) => [normalizeDoctorName(doctor.name), doctor]));
+        container.querySelectorAll('.doctor-appointment-link[data-doctor-key]').forEach((link) => {
+            const doctor = doctorsByName.get(link.dataset.doctorKey);
+            if (doctor && doctor.id) {
+                link.href = `appointments.html?doctorId=${encodeURIComponent(doctor.id)}`;
+                link.removeAttribute('aria-disabled');
+                link.textContent = 'Book Appointment';
+                return;
+            }
+
+            link.removeAttribute('href');
+            link.setAttribute('aria-disabled', 'true');
+            link.textContent = 'Account required';
+        });
 
         const visibleNames = new Set([
             'muhammadirfan',
@@ -108,7 +124,7 @@ async function initPublicDoctorDirectory() {
             'helmizareef'
         ]);
         const additionalDoctors = doctors.filter((doctor) => {
-            const normalizedName = String(doctor.name || '').toLowerCase().replace(/^dr\.?\s*/, '').replace(/[^a-z0-9]/g, '');
+            const normalizedName = normalizeDoctorName(doctor.name);
             const email = String(doctor.email || '').toLowerCase();
             if (!normalizedName || normalizedName === 'ariffzafrizat' || email.endsWith('.test') || visibleNames.has(normalizedName)) return false;
             visibleNames.add(normalizedName);
@@ -127,7 +143,7 @@ async function initPublicDoctorDirectory() {
             placeholder.textContent = initialsFor(doctor.name);
             media.append(placeholder);
 
-            const normalizedName = String(doctor.name || '').toLowerCase().replace(/^dr\.?\s*/, '').replace(/[^a-z0-9]/g, '');
+            const normalizedName = normalizeDoctorName(doctor.name);
             const photo = photos[normalizedName];
             if (photo) {
                 const image = document.createElement('img');
@@ -160,8 +176,8 @@ async function initPublicDoctorDirectory() {
             }
 
             const appointment = document.createElement('a');
-            appointment.href = 'appointments.html';
-            appointment.className = 'button';
+            appointment.href = `appointments.html?doctorId=${encodeURIComponent(doctor.id)}`;
+            appointment.className = 'button doctor-appointment-link';
             appointment.textContent = 'Book Appointment';
             card.append(media, heading, email, appointment);
             card.style.setProperty('--reveal-delay', `${Math.min(index * 60, 360)}ms`);
