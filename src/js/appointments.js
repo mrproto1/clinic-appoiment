@@ -31,7 +31,7 @@ const API_BASE = resolveApiBase();
 
 function formatDoctorSchedule(doctor) {
     const dept = doctor.department || 'Specialist';
-    return `Every 30 minutes, 00:00-23:30 • ${dept}`;
+    return `Every 30 minutes, 08:00-17:30 • ${dept}`;
 }
 
 function getStoredPatientEmail() {

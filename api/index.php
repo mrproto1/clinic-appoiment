@@ -1712,7 +1712,7 @@ function handle_appointment_routes($method, $segments, $body)
         $approvedLeave = find_approved_doctor_leave($doctorId, $date);
 
         $slots = [];
-        for ($hour = 0; $hour <= 23; $hour++) {
+        for ($hour = 8; $hour <= 17; $hour++) {
             foreach ([0, 30] as $minute) {
                 $slot = sprintf('%02d:%02d', $hour, $minute);
                 if (!is_doctor_schedule_valid($date, $slot, $doctor['department'] ?? 'General Medicine')
@@ -3338,7 +3338,7 @@ function is_doctor_schedule_valid($date, $time, $department)
     }
 
     $minutes = to_minutes($time);
-    return $minutes >= 0 && $minutes <= (23 * 60 + 30) && $minutes % 30 === 0;
+    return $minutes >= (8 * 60) && $minutes <= (17 * 60 + 30) && $minutes % 30 === 0;
 }
 
 function to_minutes($hhmm)
