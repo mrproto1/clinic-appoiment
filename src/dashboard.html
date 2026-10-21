@@ -10,7 +10,7 @@
     </script>
     <script src="js/runtime-config.js?v=memorial-popup-only-20260930" defer></script>
     <script src="js/auth.js?v=family-access-validation-20261017" defer></script>
-    <script src="js/dashboard.js?v=home-nav-dashboard-active-20261017" defer></script>
+    <script src="js/dashboard.js?v=donor-code-20261021" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -160,6 +160,14 @@
             </div>
 
             <div id="doctor-stats" class="grid"></div>
+
+            <div class="card">
+                <h3>Organ donor codes</h3>
+                <p class="muted-text">Create a one-time code for someone who agreed to join the donor wall. Codes expire after 30 days.</p>
+                <button class="btn btn-primary" type="button" onclick="generateDonorCode()">Generate donor code</button>
+                <p id="donor-code-status" class="form-status" role="status" aria-live="polite"></p>
+                <div id="donor-code-list"></div>
+            </div>
 
             <div class="card">
                 <h3>Assigned Patients by Specialty</h3>

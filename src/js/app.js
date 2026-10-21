@@ -237,6 +237,7 @@ async function initOrganDonorTribute() {
         const payload = {
             name: document.getElementById('donor-name').value.trim(),
             organType: document.getElementById('donor-organ').value,
+            code: document.getElementById('donor-code').value.trim(),
             tribute: document.getElementById('donor-tribute').value.trim()
         };
 

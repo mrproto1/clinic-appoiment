@@ -59,6 +59,9 @@ switch ($resource) {
         handle_appointment_routes($requestMethod, $segments, $body);
         break;
     case 'organ-donors':
+        if (($segments[1] ?? '') === 'codes') {
+            handle_donor_code_routes($requestMethod, $segments, $body);
+        }
         handle_organ_donor_routes($requestMethod, $segments, $body);
         break;
     case 'leaves':
@@ -396,7 +399,8 @@ function get_collection_table($name)
         'notifications' => 'collection_notifications',
         'audit_logs' => 'collection_audit_logs',
         'medical_documents' => 'collection_medical_documents',
-        'ward_beds' => 'collection_ward_beds'
+        'ward_beds' => 'collection_ward_beds',
+        'donor_codes' => 'collection_donor_codes'
     ];
 
     if (!isset($allowed[$name])) {
@@ -2256,7 +2260,13 @@ function handle_organ_donor_routes($method, $segments, $body)
             $organType = 'Any organ';
         }
 
+        $consumedCode = consume_donor_code($body['code'] ?? '');
+        if (!$consumedCode) {
+            respond(403, ['error' => 'Enter a valid donor code from your doctor. Codes can be used once and expire after 30 days.']);
+        }
+
         $donor = add_row('organ_donors', [
+            'codeId' => (int)$consumedCode['id'],
             'name' => $name,
             'organType' => $organType,
             'tribute' => $tribute,
@@ -3465,6 +3475,93 @@ function is_doctor_schedule_valid($date, $time, $department)
     return $minutes >= (8 * 60) && $minutes <= (17 * 60 + 30) && $minutes % 30 === 0;
 }
 
+function public_donor_code($record)
+{
+    return [
+        'id' => (int)$record['id'],
+        'hint' => (string)($record['hint'] ?? ''),
+        'status' => (string)($record['status'] ?? ''),
+        'createdByName' => (string)($record['createdByName'] ?? ''),
+        'createdAt' => $record['createdAt'] ?? null,
+        'expiresAt' => $record['expiresAt'] ?? null,
+        'usedAt' => $record['usedAt'] ?? null
+    ];
+}
+
+function handle_donor_code_routes($method, $segments, $body)
+{
+    $user = require_auth(['doctor', 'admin']);
+
+    if ($method === 'GET' && count($segments) === 2) {
+        $items = array_values(array_filter(read_data('donor_codes'), function ($item) use ($user) {
+            return $user['role'] === 'admin' || (int)($item['createdBy'] ?? 0) === (int)$user['id'];
+        }));
+        usort($items, function ($a, $b) { return strtotime($b['createdAt'] ?? '') <=> strtotime($a['createdAt'] ?? ''); });
+        respond(200, array_map('public_donor_code', array_slice($items, 0, 20)));
+    }
+
+    if ($method === 'POST' && count($segments) === 2) {
+        $raw = strtoupper(bin2hex(random_bytes(5)));
+        $normalized = 'OD' . $raw;
+        $record = add_row('donor_codes', [
+            'codeHash' => hash_hmac('sha256', $normalized, APP_SECRET),
+            'hint' => substr($normalized, -4),
+            'status' => 'active',
+            'createdBy' => (int)$user['id'],
+            'createdByName' => (string)($user['name'] ?? ''),
+            'expiresAt' => gmdate('c', time() + 30 * 86400)
+        ]);
+        audit_event($user, 'donor-code-created', 'donor-code', $record['id']);
+        respond(201, [
+            'message' => 'Donor code created. Share it only with the person who agreed to be listed.',
+            'code' => 'OD-' . substr($raw, 0, 5) . '-' . substr($raw, 5),
+            'record' => public_donor_code($record)
+        ]);
+    }
+
+    respond(404, ['error' => 'Route not found']);
+}
+
+function consume_donor_code($input)
+{
+    $normalized = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)$input));
+    if (strlen($normalized) < 8 || strlen($normalized) > 20) return null;
+
+    $hash = hash_hmac('sha256', $normalized, APP_SECRET);
+    $match = null;
+    foreach (read_data('donor_codes') as $item) {
+        if (hash_equals((string)($item['codeHash'] ?? ''), $hash)) {
+            $match = $item;
+            break;
+        }
+    }
+    if (!$match) return null;
+
+    $db = get_db();
+    $table = get_collection_table('donor_codes');
+    $codeId = (int)$match['id'];
+    $db->begin_transaction();
+    try {
+        $stmt = $db->prepare("SELECT payload FROM `{$table}` WHERE id = ? FOR UPDATE");
+        if (!$stmt) throw new Exception('Unable to lock donor code');
+        $stmt->bind_param('i', $codeId);
+        if (!$stmt->execute()) throw new Exception('Unable to lock donor code');
+        $row = $stmt->get_result()->fetch_assoc();
+        $locked = $row ? json_decode($row['payload'], true) : null;
+        if (!is_array($locked) || ($locked['status'] ?? '') !== 'active' || strtotime((string)($locked['expiresAt'] ?? '')) < time()) {
+            $db->rollback();
+            return null;
+        }
+        $updated = update_row('donor_codes', $codeId, ['status' => 'used', 'usedAt' => gmdate('c')]);
+        $db->commit();
+        return $updated;
+    } catch (Throwable $error) {
+        $db->rollback();
+        error_log('Donor code redemption failed: ' . $error->getMessage());
+        return null;
+    }
+}
+
 function to_minutes($hhmm)
 {
     if (!preg_match('/^(\d{2}):(\d{2})$/', $hhmm, $matches)) {
@@ -3482,7 +3579,7 @@ function to_minutes($hhmm)
 
 function initialize_data_store()
 {
-    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates', 'medicine_stock', 'notifications', 'audit_logs', 'medical_documents', 'ward_beds'] as $collection) {
+    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates', 'medicine_stock', 'notifications', 'audit_logs', 'medical_documents', 'ward_beds', 'donor_codes'] as $collection) {
         ensure_collection_table($collection);
     }
 

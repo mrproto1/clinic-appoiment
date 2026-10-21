@@ -57,6 +57,11 @@
                     <input type="text" id="donor-name" maxlength="120" placeholder="Full name" required>
                 </div>
                 <div class="form-group">
+                    <label for="donor-code">Doctor's donor code</label>
+                    <input type="text" id="donor-code" maxlength="20" placeholder="OD-XXXXX-XXXXX" autocomplete="off" required>
+                    <small class="muted-text">Ask your doctor for a one-time code before adding your tribute.</small>
+                </div>
+                <div class="form-group">
                     <label for="donor-organ">Donation intention</label>
                     <select id="donor-organ">
                         <option>Any organ</option>
@@ -101,6 +106,6 @@
         <span>The Protocol Cardiology</span>
         <span>Honouring every gift of life</span>
     </footer>
-    <script src="../js/app.js?v=api-base-20261006" defer></script>
+    <script src="../js/app.js?v=donor-code-20261021" defer></script>
 </body>
 </html>

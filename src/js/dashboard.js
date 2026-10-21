@@ -664,6 +664,7 @@ async function loadDoctorDashboard() {
         loadDoctorDeathRecords(assignedPatients);
         loadMedicineStock('doctor-medicine-stock');
         loadMedicalDocuments('doctor-medical-document-list');
+        loadDonorCodes();
     } catch (error) {
         console.error('Error loading doctor dashboard:', error);
     }
@@ -888,6 +889,39 @@ async function cancelDoctorAppointment(appointmentId) {
     } catch (error) {
         console.error('Error cancelling appointment:', error);
         showNotification('Unable to cancel appointment right now.', 'danger');
+    }
+}
+
+async function loadDonorCodes() {
+    const list = document.getElementById('donor-code-list');
+    if (!list) return;
+    try {
+        const response = await apiCall('/organ-donors/codes');
+        if (!response || !response.ok) return;
+        const codes = await response.json();
+        list.replaceChildren(...codes.map((item) => {
+            const row = clinicalEl('p', 'muted-text', `Code ending ${item.hint} · ${item.status} · expires ${String(item.expiresAt || '').slice(0, 10)}`);
+            return row;
+        }));
+    } catch (error) {
+        console.error('Error loading donor codes:', error);
+    }
+}
+
+async function generateDonorCode() {
+    const status = document.getElementById('donor-code-status');
+    try {
+        const response = await apiCall('/organ-donors/codes', { method: 'POST', body: JSON.stringify({}) });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            if (status) status.textContent = result.error || 'Unable to create a donor code.';
+            return;
+        }
+        if (status) status.textContent = `Donor code: ${result.code} (shown once; expires in 30 days)`;
+        await loadDonorCodes();
+    } catch (error) {
+        console.error('Error creating donor code:', error);
+        if (status) status.textContent = 'Unable to create a donor code right now.';
     }
 }
 
