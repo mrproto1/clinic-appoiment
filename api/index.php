@@ -484,7 +484,6 @@ function ensure_collection_table($name)
 
 function collection_count($name)
 {
-    ensure_collection_table($name);
     $db = get_db();
     $table = get_collection_table($name);
     $result = $db->query("SELECT COUNT(*) AS total FROM `{$table}`");
@@ -497,7 +496,6 @@ function collection_count($name)
 
 function read_data($name)
 {
-    ensure_collection_table($name);
     $db = get_db();
     $table = get_collection_table($name);
     $result = $db->query("SELECT id, payload FROM `{$table}` ORDER BY id ASC");
@@ -520,7 +518,6 @@ function read_data($name)
 
 function write_data($name, $rows)
 {
-    ensure_collection_table($name);
     $db = get_db();
     $table = get_collection_table($name);
 
@@ -3634,6 +3631,31 @@ function to_minutes($hhmm)
 
 function initialize_data_store()
 {
+    $db = get_db();
+    $markerQuery = "SELECT `value` FROM `app_metadata` WHERE `key` = 'data_store_initialized_v1' LIMIT 1";
+    $markerResult = @$db->query($markerQuery);
+    $markerRow = $markerResult ? $markerResult->fetch_assoc() : null;
+    if (($markerRow['value'] ?? '') === '1') {
+        return;
+    }
+
+    if (!$markerResult && !$db->query("CREATE TABLE IF NOT EXISTS `app_metadata` (`key` VARCHAR(64) NOT NULL, `value` VARCHAR(255) NOT NULL, PRIMARY KEY (`key`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci")) {
+        respond(500, ['error' => 'Unable to prepare API metadata table']);
+    }
+
+    $lockResult = $db->query("SELECT GET_LOCK('clinic_appointment_system_initialize_v1', 15) AS acquired");
+    $lockRow = $lockResult ? $lockResult->fetch_assoc() : null;
+    if ((int)($lockRow['acquired'] ?? 0) !== 1) {
+        respond(503, ['error' => 'Database initialization is busy; retry the request']);
+    }
+
+    $markerResult = $db->query($markerQuery);
+    $markerRow = $markerResult ? $markerResult->fetch_assoc() : null;
+    if (($markerRow['value'] ?? '') === '1') {
+        $db->query("SELECT RELEASE_LOCK('clinic_appointment_system_initialize_v1')");
+        return;
+    }
+
     foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates', 'medicine_stock', 'notifications', 'audit_logs', 'medical_documents', 'ward_beds', 'donor_codes'] as $collection) {
         ensure_collection_table($collection);
     }
@@ -3714,6 +3736,11 @@ function initialize_data_store()
     if (collection_count('appointments') === 0) {
         write_data('appointments', []);
     }
+
+    if (!$db->query("INSERT INTO `app_metadata` (`key`, `value`) VALUES ('data_store_initialized_v1', '1') ON DUPLICATE KEY UPDATE `value` = '1'")) {
+        respond(500, ['error' => 'Unable to mark API database initialization complete']);
+    }
+    $db->query("SELECT RELEASE_LOCK('clinic_appointment_system_initialize_v1')");
 }
 
 function sync_doctor_profiles()
