@@ -3,10 +3,7 @@ window.APP_RUNTIME_CONFIG = window.APP_RUNTIME_CONFIG || (function buildRuntimeC
         return { apiBase: '' };
     }
 
-    const override = (window.__APP_API_BASE__ || window.APP_API_BASE_URL || '').toString().trim();
-    if (override) {
-        return { apiBase: override.replace(/\/+$/, '') };
-    }
+    const configuredOverride = (window.__APP_API_BASE__ || window.APP_API_BASE_URL || '').toString().trim();
 
     const pathName = window.location.pathname || '/';
     let projectBasePath = '';
@@ -16,7 +13,11 @@ window.APP_RUNTIME_CONFIG = window.APP_RUNTIME_CONFIG || (function buildRuntimeC
         projectBasePath = pathName.substring(0, srcIndex);
     }
 
-    const apiBase = `${window.location.origin}${projectBasePath}/api`.replace(/\/+$/, '/api');
+    const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    const fallbackApiBase = isLocalHost
+        ? `${window.location.origin}${projectBasePath}/api`
+        : `${window.location.origin}/api`;
+    const apiBase = (configuredOverride || fallbackApiBase).replace(/\/+$/, '');
 
     return {
         apiBase

@@ -1,4 +1,21 @@
 <?php
+if (PHP_SAPI === 'cli-server') {
+    $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+    $documentRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '');
+    $requestedFile = $documentRoot === false
+        ? false
+        : realpath($documentRoot . DIRECTORY_SEPARATOR . ltrim($requestPath, '/'));
+
+    if (
+        $documentRoot !== false
+        && $requestedFile !== false
+        && ($requestedFile === $documentRoot || strpos($requestedFile, $documentRoot . DIRECTORY_SEPARATOR) === 0)
+        && file_exists($requestedFile)
+    ) {
+        return false;
+    }
+}
+
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
@@ -13,12 +30,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-define('APP_SECRET', getenv('APP_SECRET') ?: 'hospital-secret-key-2026');
-define('MYSQL_HOST', getenv('MYSQL_HOST') ?: '127.0.0.1');
+$requestHost = strtolower((string)preg_replace('/:\\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? '')));
+$isLocalHost = in_array($requestHost, ['localhost', '127.0.0.1', '::1'], true);
+$appSecret = getenv('APP_SECRET');
+$mysqlHost = getenv('MYSQL_HOST');
+$mysqlUser = getenv('MYSQL_USER');
+$mysqlPass = getenv('MYSQL_PASS');
+$mysqlDb = getenv('MYSQL_DB');
+
+if ((!is_string($appSecret) || trim($appSecret) === '') && !$isLocalHost) {
+    http_response_code(500);
+    echo json_encode(['error' => 'APP_SECRET is not configured']);
+    exit;
+}
+
+if (!$isLocalHost && (!$mysqlHost || !$mysqlUser || !$mysqlPass || !$mysqlDb)) {
+    http_response_code(500);
+    echo json_encode(['error' => 'MySQL environment variables are not configured']);
+    exit;
+}
+
+define('APP_SECRET', is_string($appSecret) && trim($appSecret) !== '' ? $appSecret : 'local-development-secret');
+define('MYSQL_HOST', $mysqlHost ?: '127.0.0.1');
 define('MYSQL_PORT', getenv('MYSQL_PORT') ?: 3306);
-define('MYSQL_USER', getenv('MYSQL_USER') ?: 'root');
-define('MYSQL_PASS', getenv('MYSQL_PASS') ?: '');
-define('MYSQL_DB', getenv('MYSQL_DB') ?: 'clinic_appointment_system');
+define('MYSQL_USER', $mysqlUser ?: 'root');
+define('MYSQL_PASS', $mysqlPass ?: '');
+define('MYSQL_DB', $mysqlDb ?: 'clinic_appointment_system');
 
 $requestMethod = $_SERVER['REQUEST_METHOD'];
 $requestUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -363,22 +400,12 @@ function get_db()
         return $db;
     }
 
-    $bootstrap = @new mysqli(MYSQL_HOST, MYSQL_USER, MYSQL_PASS, '', MYSQL_PORT);
-    if ($bootstrap->connect_errno) {
-        respond(500, ['error' => 'MySQL connection failed: ' . $bootstrap->connect_error]);
+    $db = @new mysqli(MYSQL_HOST, MYSQL_USER, MYSQL_PASS, MYSQL_DB, MYSQL_PORT);
+    if ($db->connect_errno) {
+        respond(500, ['error' => 'MySQL connection failed']);
     }
 
-    $dbName = str_replace('`', '``', MYSQL_DB);
-    if (!$bootstrap->query("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")) {
-        respond(500, ['error' => 'Unable to create/select MySQL database']);
-    }
-
-    if (!$bootstrap->select_db(MYSQL_DB)) {
-        respond(500, ['error' => 'Unable to select MySQL database']);
-    }
-
-    $bootstrap->set_charset('utf8mb4');
-    $db = $bootstrap;
+    $db->set_charset('utf8mb4');
     return $db;
 }
 

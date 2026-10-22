@@ -1,58 +1,41 @@
 # Deployment to Vercel
 
-This project is a frontend app with a PHP/MySQL backend. Vercel can host the frontend static files, but the PHP API and MySQL database must be hosted separately.
+This project runs its PHP frontend and API in Vercel's Container Runtime. The MySQL database remains a separate managed service.
 
 ## 1) Frontend deployment
 
 1. Push this project to GitHub.
-2. Open Vercel and import the repository.
-3. Set the project root to the repository root.
-4. Use the following settings:
-   - Framework: Other
-   - Build Command: leave blank
-   - Output Directory: src
-5. Deploy.
+2. Import the repository in Vercel and leave Root Directory at the repository root.
+3. Keep the Framework Preset as Other and do not set a static output directory.
+4. Deploy with the Container Runtime enabled for the project.
 
 ## 2) API deployment
 
-Because this app uses PHP and MySQL, the backend in `api/index.php` should be deployed to a PHP-capable host such as:
-- Render
-- Railway
-- VPS / cPanel
-- a custom PHP server
+Vercel builds `Dockerfile.vercel` and routes the site and `/api/*` requests to the same container. Set `APP_SECRET`, `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASS`, and `MYSQL_DB` in Vercel Project Settings under Environment Variables. The configured MySQL database must already exist and be reachable from Vercel.
 
-Make sure the backend is publicly reachable at a URL like:
-- `https://your-backend-url.com/api`
+After a suspected security incident, use new database credentials and a new `APP_SECRET`. Restore only from a backup you trust. Never put credentials in frontend code or commit them.
 
 ## 3) Configure runtime API URL
 
-Before deploying the frontend, set the runtime API base in the browser:
+`src/js/runtime-config.js` uses the same-origin `/api` endpoint in production and auto-detects the local project path on localhost:
 
-```html
-<script>
-  window.__APP_API_BASE__ = 'https://your-render-backend-url.onrender.com/api';
-</script>
-```
-
-The project already includes this override in [src/index.html](src/index.html).
-
-Place it before the app scripts in the HTML file, or set it from the deployed environment.
+- `http://localhost/<project-folder>/api`
+- `https://your-vercel-domain/api`
 
 ## 4) Important note
 
-The current app uses local PHP + MySQL under XAMPP. That setup will not work on Vercel directly. Vercel is only suitable for the static frontend portion.
+The container image serves the static files and PHP API. Vercel does not provide this app's MySQL database; provision one separately and configure the connection variables before using the API.
 
 ## 5) Suggested production architecture
 
-- Frontend: Vercel
-- Backend: Render / Railway / VPS
-- Database: MySQL or Postgres service
-- API URL: stored in runtime config or environment
+- Frontend and backend: Vercel Container Runtime
+- Database: trusted managed MySQL service
+- API URL: same-origin `/api`
 
-## 6) Example env pattern
+## 6) Optional API override
 
-If you later wire this to a hosted backend, use:
+The Vercel container uses same-origin routing by default. Only set an override if the API is hosted on a different domain:
 
 ```js
-window.__APP_API_BASE__ = 'https://your-backend-url.com/api';
+window.APP_API_BASE_URL = 'https://your-backend-url.com/api';
 ```
