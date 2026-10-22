@@ -429,7 +429,7 @@ function get_db()
         $flags = MYSQLI_CLIENT_SSL;
     }
 
-    if (!$db->real_connect(MYSQL_HOST, MYSQL_USER, MYSQL_PASS, MYSQL_DB, MYSQL_PORT, null, $flags)) {
+    if (!@$db->real_connect(MYSQL_HOST, MYSQL_USER, MYSQL_PASS, MYSQL_DB, MYSQL_PORT, null, $flags)) {
         respond(500, ['error' => 'MySQL connection failed']);
     }
 
