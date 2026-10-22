@@ -32,11 +32,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 $requestHost = strtolower((string)preg_replace('/:\\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? '')));
 $isLocalHost = in_array($requestHost, ['localhost', '127.0.0.1', '::1'], true);
+define('IS_LOCAL_HOST', $isLocalHost);
 $appSecret = getenv('APP_SECRET');
 $mysqlHost = getenv('MYSQL_HOST');
 $mysqlUser = getenv('MYSQL_USER');
 $mysqlPass = getenv('MYSQL_PASS');
 $mysqlDb = getenv('MYSQL_DB');
+$mysqlSslCa = getenv('MYSQL_SSL_CA');
 
 if ((!is_string($appSecret) || trim($appSecret) === '') && !$isLocalHost) {
     http_response_code(500);
@@ -50,12 +52,19 @@ if (!$isLocalHost && (!$mysqlHost || !$mysqlUser || !$mysqlPass || !$mysqlDb)) {
     exit;
 }
 
+if (!$isLocalHost && (!is_string($mysqlSslCa) || trim($mysqlSslCa) === '')) {
+    http_response_code(500);
+    echo json_encode(['error' => 'MYSQL_SSL_CA is not configured']);
+    exit;
+}
+
 define('APP_SECRET', is_string($appSecret) && trim($appSecret) !== '' ? $appSecret : 'local-development-secret');
 define('MYSQL_HOST', $mysqlHost ?: '127.0.0.1');
 define('MYSQL_PORT', getenv('MYSQL_PORT') ?: 3306);
 define('MYSQL_USER', $mysqlUser ?: 'root');
 define('MYSQL_PASS', $mysqlPass ?: '');
 define('MYSQL_DB', $mysqlDb ?: 'clinic_appointment_system');
+define('MYSQL_SSL_CA', is_string($mysqlSslCa) ? $mysqlSslCa : '');
 
 $requestMethod = $_SERVER['REQUEST_METHOD'];
 $requestUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -400,8 +409,27 @@ function get_db()
         return $db;
     }
 
-    $db = @new mysqli(MYSQL_HOST, MYSQL_USER, MYSQL_PASS, MYSQL_DB, MYSQL_PORT);
-    if ($db->connect_errno) {
+    $db = mysqli_init();
+    if (!$db) {
+        respond(500, ['error' => 'Unable to initialize MySQL connection']);
+    }
+
+    $flags = 0;
+    if (!IS_LOCAL_HOST) {
+        $caContents = str_replace('\\n', "\n", trim(MYSQL_SSL_CA));
+        $caPath = '/tmp/mysql-ca-' . hash('sha256', $caContents) . '.pem';
+        if (!is_file($caPath) && file_put_contents($caPath, $caContents, LOCK_EX) === false) {
+            respond(500, ['error' => 'Unable to configure MySQL TLS certificate']);
+        }
+
+        $db->options(MYSQLI_OPT_SSL_VERIFY_SERVER_CERT, true);
+        if (!$db->ssl_set(null, null, $caPath, null, null)) {
+            respond(500, ['error' => 'Unable to configure MySQL TLS certificate']);
+        }
+        $flags = MYSQLI_CLIENT_SSL;
+    }
+
+    if (!$db->real_connect(MYSQL_HOST, MYSQL_USER, MYSQL_PASS, MYSQL_DB, MYSQL_PORT, null, $flags)) {
         respond(500, ['error' => 'MySQL connection failed']);
     }
 

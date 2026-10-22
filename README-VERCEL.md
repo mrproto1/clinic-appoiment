@@ -11,7 +11,7 @@ This project runs its PHP frontend and API in Vercel's Container Runtime. The My
 
 ## 2) API deployment
 
-Vercel builds `Dockerfile.vercel` and routes the site and `/api/*` requests to the same container. Set `APP_SECRET`, `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASS`, and `MYSQL_DB` in Vercel Project Settings under Environment Variables. The configured MySQL database must already exist and be reachable from Vercel.
+Vercel builds `Dockerfile.vercel` and routes the site and `/api/*` requests to the same container. Set `APP_SECRET`, `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASS`, `MYSQL_DB`, and `MYSQL_SSL_CA` in Vercel Project Settings under Environment Variables. `MYSQL_SSL_CA` must contain the CA certificate supplied by your database provider. The configured MySQL database must already exist and be reachable from Vercel.
 
 After a suspected security incident, use new database credentials and a new `APP_SECRET`. Restore only from a backup you trust. Never put credentials in frontend code or commit them.
 
