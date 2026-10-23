@@ -78,7 +78,7 @@ if (($segments[0] ?? '') === 'chat') {
 
 initialize_data_store();
 
-$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests', 'death-certificates', 'medicine-stock', 'notifications', 'audit-logs', 'medical-documents', 'wards'];
+$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'operations', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests', 'death-certificates', 'medicine-stock', 'notifications', 'audit-logs', 'medical-documents', 'wards'];
 while (!empty($segments) && !in_array($segments[0], $allowedResources, true)) {
     array_shift($segments);
 }
@@ -103,6 +103,9 @@ switch ($resource) {
         break;
     case 'appointments':
         handle_appointment_routes($requestMethod, $segments, $body);
+        break;
+    case 'operations':
+        handle_operation_routes($requestMethod, $segments, $body);
         break;
     case 'organ-donors':
         if (($segments[1] ?? '') === 'codes') {
@@ -444,6 +447,7 @@ function get_collection_table($name)
         'patients' => 'collection_patients',
         'messages' => 'collection_messages',
         'appointments' => 'collection_appointments',
+        'operations' => 'collection_operations',
         'organ_donors' => 'collection_organ_donors',
         'leaves' => 'collection_leaves',
         'bulletins' => 'collection_bulletins',
@@ -1755,6 +1759,91 @@ function is_future_appointment_slot($date, $time)
     $timezone = new DateTimeZone('Asia/Kuala_Lumpur');
     $slot = DateTimeImmutable::createFromFormat('!Y-m-d H:i', (string)$date . ' ' . (string)$time, $timezone);
     return $slot && $slot > new DateTimeImmutable('now', $timezone);
+}
+
+function handle_operation_routes($method, $segments, $body)
+{
+    $user = require_auth(['admin', 'doctor']);
+    ensure_collection_table('operations');
+
+    if ($method === 'GET' && count($segments) === 1) {
+        $operations = read_data('operations');
+        if (($user['role'] ?? '') === 'doctor') {
+            $operations = array_values(array_filter($operations, function ($operation) use ($user) {
+                return (int)($operation['doctorId'] ?? 0) === (int)$user['id'];
+            }));
+        }
+        usort($operations, function ($first, $second) {
+            return strcmp(($first['date'] ?? '') . ' ' . ($first['time'] ?? ''), ($second['date'] ?? '') . ' ' . ($second['time'] ?? ''));
+        });
+        respond(200, $operations);
+    }
+
+    if ($method === 'POST' && count($segments) === 1) {
+        if (($user['role'] ?? '') !== 'admin') {
+            respond(403, ['error' => 'Only admins can schedule operations']);
+        }
+
+        $doctorId = (int)($body['doctorId'] ?? 0);
+        $procedure = trim((string)($body['procedure'] ?? ''));
+        $date = trim((string)($body['date'] ?? ''));
+        $time = trim((string)($body['time'] ?? ''));
+        $location = trim((string)($body['location'] ?? ''));
+        $notes = trim((string)($body['notes'] ?? ''));
+
+        if ($doctorId <= 0 || $procedure === '' || $date === '' || $time === '' || $location === '') {
+            respond(400, ['error' => 'Doctor, procedure, date, time, and location are required']);
+        }
+        if (strlen($procedure) > 160 || strlen($location) > 120 || strlen($notes) > 1000) {
+            respond(400, ['error' => 'Operation details exceed the allowed length']);
+        }
+        if (!valid_iso_date($date) || !preg_match('/^\d{2}:\d{2}$/', $time) || !is_future_appointment_slot($date, $time)) {
+            respond(400, ['error' => 'Choose a valid future date and time']);
+        }
+
+        $doctor = find_by_id('users', $doctorId);
+        if (!$doctor || ($doctor['role'] ?? '') !== 'doctor') {
+            respond(404, ['error' => 'Doctor not found']);
+        }
+
+        foreach (read_data('operations') as $existing) {
+            if ((int)($existing['doctorId'] ?? 0) === $doctorId
+                && ($existing['date'] ?? '') === $date
+                && ($existing['time'] ?? '') === $time) {
+                respond(409, ['error' => 'This doctor already has an operation scheduled at that time']);
+            }
+        }
+
+        $operation = add_row('operations', [
+            'doctorId' => $doctorId,
+            'doctorName' => (string)($doctor['name'] ?? 'Doctor'),
+            'doctorDepartment' => (string)($doctor['department'] ?? 'General Medicine'),
+            'procedure' => $procedure,
+            'date' => $date,
+            'time' => $time,
+            'location' => $location,
+            'notes' => $notes,
+            'status' => 'Scheduled'
+        ]);
+        audit_event($user, 'operation-scheduled', 'operation', (int)$operation['id']);
+        respond(201, ['message' => 'Operation scheduled', 'operation' => $operation]);
+    }
+
+    if ($method === 'DELETE' && count($segments) === 2 && is_numeric($segments[1])) {
+        if (($user['role'] ?? '') !== 'admin') {
+            respond(403, ['error' => 'Only admins can remove operations from the schedule']);
+        }
+
+        $operationId = (int)$segments[1];
+        if (!find_by_id('operations', $operationId)) {
+            respond(404, ['error' => 'Operation not found']);
+        }
+        delete_row('operations', $operationId);
+        audit_event($user, 'operation-removed', 'operation', $operationId);
+        respond(200, ['message' => 'Operation removed from the schedule']);
+    }
+
+    respond(404, ['error' => 'Route not found']);
 }
 
 function handle_appointment_routes($method, $segments, $body)
@@ -3695,7 +3784,7 @@ function initialize_data_store()
         return;
     }
 
-    foreach (['users', 'patients', 'messages', 'appointments', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates', 'medicine_stock', 'notifications', 'audit_logs', 'medical_documents', 'ward_beds', 'donor_codes'] as $collection) {
+    foreach (['users', 'patients', 'messages', 'appointments', 'operations', 'organ_donors', 'leaves', 'bulletins', 'site_settings', 'clinical_requests', 'death_certificates', 'medicine_stock', 'notifications', 'audit_logs', 'medical_documents', 'ward_beds', 'donor_codes'] as $collection) {
         ensure_collection_table($collection);
     }
 

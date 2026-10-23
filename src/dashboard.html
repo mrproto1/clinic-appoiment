@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=doctor-appointment-toggle-20261023">
+    <link rel="stylesheet" href="css/styles.css?v=admin-operation-schedule-20261023">
     <script src="js/runtime-config.js?v=vercel-api-migration-20261022" defer></script>
     <script src="js/auth.js?v=family-access-validation-20261017" defer></script>
-    <script src="js/dashboard.js?v=doctor-appointment-toggle-20261023" defer></script>
+    <script src="js/dashboard.js?v=admin-operation-schedule-20261023" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -87,6 +87,9 @@
                 </li>
                 <li id="admin-menu-8" style="display: none;">
                     <a href="#" onclick="switchSection('ward-management-section')" class="nav-link">Ward Management</a>
+                </li>
+                <li id="admin-menu-9" style="display: none;">
+                    <a href="#" onclick="switchSection('admin-operations-section')" class="nav-link">Operation Schedule</a>
                 </li>
                 
                 <!-- PATIENT MENU -->
@@ -221,8 +224,8 @@
                 <h1>🗓️ Operation Schedule</h1>
             </div>
             <div class="card">
-                <h3>Schedule by your specialty</h3>
-                <ul id="doctor-operations-list" class="detail-list"></ul>
+                <h3>Operations assigned to you</h3>
+                <ul id="doctor-operations-list" class="detail-list doctor-operations-list"></ul>
             </div>
         </div>
 
@@ -865,6 +868,50 @@
                 <p id="admin-doctor-status" class="form-status" role="status" aria-live="polite"></p>
             </form>
             <div id="admin-doctors" class="admin-doctor-grid" aria-live="polite"></div>
+        </div>
+
+        <div id="admin-operations-section" class="content-section">
+            <div class="header">
+                <h1>Operation Schedule</h1>
+                <button class="btn btn-primary" type="button" onclick="switchSection('admin-section')">← Back</button>
+            </div>
+            <p class="admin-doctor-intro">Schedule an operation for a doctor. Removing an entry only removes it from this schedule.</p>
+            <form id="admin-operation-form" class="card admin-operation-form" autocomplete="off">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="admin-operation-doctor">Doctor</label>
+                        <select id="admin-operation-doctor" required>
+                            <option value="">Select doctor</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-operation-procedure">Operation / procedure</label>
+                        <input id="admin-operation-procedure" type="text" maxlength="160" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-operation-date">Date</label>
+                        <input id="admin-operation-date" type="date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-operation-time">Time</label>
+                        <input id="admin-operation-time" type="time" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-operation-location">Theatre / location</label>
+                        <input id="admin-operation-location" type="text" maxlength="120" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-operation-notes">Notes (optional)</label>
+                        <input id="admin-operation-notes" type="text" maxlength="1000">
+                    </div>
+                </div>
+                <button class="btn btn-primary" type="submit">Schedule operation</button>
+                <p id="admin-operation-status" class="form-status" role="status" aria-live="polite"></p>
+            </form>
+            <div class="card">
+                <h3>Scheduled operations</h3>
+                <div id="admin-operation-list" class="admin-operation-list" aria-live="polite"></div>
+            </div>
         </div>
 
         <!-- ADMIN PATIENTS -->

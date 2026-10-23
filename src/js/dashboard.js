@@ -504,7 +504,7 @@ function showDashboardRoleMenu(role) {
         doctor: ['doctor-menu', 'doctor-menu-2', 'doctor-menu-3', 'doctor-menu-4', 'doctor-menu-5', 'doctor-menu-6', 'doctor-menu-7'],
         staff: ['staff-menu', 'staff-menu-2', 'staff-menu-3', 'staff-menu-4'],
         pharmacy: ['pharmacy-menu'],
-        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7', 'admin-menu-8'],
+        admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7', 'admin-menu-8', 'admin-menu-9'],
         patient: ['patient-menu', 'patient-menu-2'],
         family: ['family-menu', 'patient-menu', 'patient-menu-2']
     };
@@ -542,56 +542,6 @@ function getDoctorLabel(doctorId) {
     const doctor = getDoctorById(doctorId);
     if (!doctor) return 'Unassigned';
     return `${doctor.name} (${doctor.department || 'General Medicine'})`;
-}
-
-function getDoctorScheduleEntries(doctor) {
-    const department = (doctor?.department || '').toLowerCase();
-
-    if (department.includes('cardio')) {
-        return [
-            '09:00 - Cardiac clinic rounds and ECG review',
-            '11:00 - Interventional cardiology consults',
-            '14:00 - Post-procedure and hypertension follow-ups'
-        ];
-    }
-
-    if (department.includes('psychiat')) {
-        return [
-            '09:00 - Mental health assessment clinic',
-            '11:30 - Psychiatry consultation sessions',
-            '14:00 - Follow-up and treatment planning reviews'
-        ];
-    }
-
-    if (department.includes('neuro-oph')) {
-        return [
-            '09:00 - Neuro-visual pathway assessment clinic',
-            '11:30 - Optic nerve and diplopia specialist session',
-            '14:00 - Neuro-ophthalmology follow-up reviews'
-        ];
-    }
-
-    if (department.includes('neuro')) {
-        return [
-            '08:00 - Neurosurgery ward review',
-            '10:30 - Brain and spine operative planning',
-            '14:00 - Post-op neurological monitoring rounds'
-        ];
-    }
-
-    if (department.includes('surg')) {
-        return [
-            '08:30 - Surgical pre-op briefing',
-            '11:00 - Theatre supervision and operative block',
-            '15:00 - Surgical follow-up outpatient review'
-        ];
-    }
-
-    return [
-        '09:00 - General specialist assessment',
-        '11:00 - Treatment planning and diagnostics',
-        '14:30 - Follow-up and continuity of care rounds'
-    ];
 }
 
 function populateDoctorSelect() {
@@ -632,11 +582,12 @@ function showRoleBasedSections(role) {
 // DOCTOR DASHBOARD
 async function loadDoctorDashboard() {
     try {
-        const [assignedRes, messagesRes, appointmentsRes, leavesRes] = await Promise.all([
+        const [assignedRes, messagesRes, appointmentsRes, leavesRes, operationsRes] = await Promise.all([
             apiCall(`/patients/doctor/${currentUser.id}`),
             apiCall('/messages/group/doctor'),
             apiCall(`/appointments/doctor/${currentUser.id}`),
-            apiCall(`/leaves/doctor/${currentUser.id}`)
+            apiCall(`/leaves/doctor/${currentUser.id}`),
+            apiCall('/operations')
         ]);
 
         if (!assignedRes || !assignedRes.ok) return;
@@ -645,6 +596,7 @@ async function loadDoctorDashboard() {
         const messages = messagesRes && messagesRes.ok ? await messagesRes.json() : [];
         const appointments = appointmentsRes && appointmentsRes.ok ? await appointmentsRes.json() : [];
         const leaves = leavesRes && leavesRes.ok ? await leavesRes.json() : [];
+        const operations = operationsRes && operationsRes.ok ? await operationsRes.json() : [];
         const doctorProfile = getDoctorById(currentUser.id) || {
             name: currentUser.name,
             department: currentUser.department || 'General Medicine'
@@ -658,7 +610,7 @@ async function loadDoctorDashboard() {
         displayDoctorAppointmentCalendar(appointments, 'doctor-appointment-calendar');
         displayDoctorAppointmentCalendar(appointments, 'doctor-main-appointment-calendar');
         displayDoctorLeaves(leaves);
-        renderDoctorOperationSchedule(doctorProfile);
+        renderDoctorOperationSchedule(operations);
         startLivePatientTelemetry(assignedPatients);
         loadDoctorClinicalRequests(assignedPatients);
         loadDoctorDeathRecords(assignedPatients);
@@ -958,12 +910,30 @@ async function reassignDoctorAppointment(appointmentId) {
     }
 }
 
-function renderDoctorOperationSchedule(doctorProfile) {
+function renderDoctorOperationSchedule(operations) {
     const list = document.getElementById('doctor-operations-list');
     if (!list) return;
 
-    const entries = getDoctorScheduleEntries(doctorProfile);
-    list.innerHTML = entries.map((entry) => `<li>${entry}</li>`).join('');
+    if (!Array.isArray(operations) || operations.length === 0) {
+        list.innerHTML = '<li class="muted-text">No operations are assigned to your schedule.</li>';
+        return;
+    }
+
+    list.replaceChildren();
+    operations.forEach((operation) => {
+        const item = document.createElement('li');
+        const title = document.createElement('strong');
+        title.textContent = operation.procedure || 'Operation';
+        const details = document.createElement('span');
+        details.textContent = `${operation.date || ''} ${operation.time || ''} · ${operation.location || ''}`;
+        item.append(title, details);
+        if (operation.notes) {
+            const notes = document.createElement('span');
+            notes.textContent = operation.notes;
+            item.append(notes);
+        }
+        list.append(item);
+    });
 }
 
 function generateLiveVitals(patient) {
@@ -1977,12 +1947,13 @@ async function loadAdminDashboard() {
             apiCall('/appointments'),
             apiCall('/leaves'),
             apiCall('/bulletins/manage'),
-            apiCall('/site-status')
+            apiCall('/site-status'),
+            apiCall('/operations')
         ]);
         const requestTimeout = new Promise((_, reject) => {
             timeoutId = window.setTimeout(() => reject(new Error('Admin dashboard request timed out')), 15000);
         });
-        const [patientsRes, usersRes, appointmentsRes, leavesRes, bulletinsRes, siteStatusRes] = await Promise.race([requestBatch, requestTimeout]);
+        const [patientsRes, usersRes, appointmentsRes, leavesRes, bulletinsRes, siteStatusRes, operationsRes] = await Promise.race([requestBatch, requestTimeout]);
         window.clearTimeout(timeoutId);
 
         if (!patientsRes || !patientsRes.ok || !usersRes || !usersRes.ok) {
@@ -2002,12 +1973,14 @@ async function loadAdminDashboard() {
         const leaves = leavesRes && leavesRes.ok ? await leavesRes.json() : [];
         const bulletins = bulletinsRes && bulletinsRes.ok ? await bulletinsRes.json() : null;
         const siteStatus = siteStatusRes && siteStatusRes.ok ? await siteStatusRes.json() : null;
+        const operations = operationsRes && operationsRes.ok ? await operationsRes.json() : [];
 
         displayAdminStats(patients, users, appointments, leaves);
         displayAdminPriorityWatchlist(patients);
         loadWardManagement(patients);
         displayAdminUsers(users);
         displayAdminDoctors(users);
+        displayAdminOperations(operations, users);
         displayAdminPatients(patients);
         displayAdminOverviewPatients(patients);
         displayAdminOverviewAppointments(appointments, users);
@@ -2021,6 +1994,123 @@ async function loadAdminDashboard() {
         if (timeoutId) window.clearTimeout(timeoutId);
         console.error('Error loading admin dashboard:', error);
         setAlert('Unable to load the admin dashboard. Check your connection and Railway API, then retry.');
+    }
+}
+
+function displayAdminOperations(operations, users) {
+    const doctorSelect = document.getElementById('admin-operation-doctor');
+    const list = document.getElementById('admin-operation-list');
+    if (!doctorSelect || !list) return;
+
+    const selectedDoctorId = doctorSelect.value;
+    doctorSelect.replaceChildren(new Option('Select doctor', ''));
+    (Array.isArray(users) ? users : [])
+        .filter((user) => user.role === 'doctor')
+        .sort((first, second) => String(first.name || '').localeCompare(String(second.name || '')))
+        .forEach((doctor) => {
+            const option = document.createElement('option');
+            option.value = String(doctor.id);
+            option.textContent = `${doctor.name} (${doctor.department || 'General Medicine'})`;
+            doctorSelect.append(option);
+        });
+    if (selectedDoctorId && [...doctorSelect.options].some((option) => option.value === selectedDoctorId)) {
+        doctorSelect.value = selectedDoctorId;
+    }
+
+    list.replaceChildren();
+    if (!Array.isArray(operations) || operations.length === 0) {
+        const emptyState = document.createElement('p');
+        emptyState.className = 'muted-text';
+        emptyState.textContent = 'No operations are scheduled.';
+        list.append(emptyState);
+        return;
+    }
+
+    operations.forEach((operation) => {
+        const item = document.createElement('article');
+        item.className = 'admin-operation-item';
+        const details = document.createElement('div');
+        details.className = 'admin-operation-details';
+        const title = document.createElement('strong');
+        title.textContent = operation.procedure || 'Operation';
+        const summary = document.createElement('p');
+        summary.textContent = `${operation.date || ''} ${operation.time || ''} · ${operation.doctorName || 'Doctor'} (${operation.doctorDepartment || 'Specialist'}) · ${operation.location || ''}`;
+        details.append(title, summary);
+        if (operation.notes) {
+            const notes = document.createElement('p');
+            notes.className = 'muted-text';
+            notes.textContent = operation.notes;
+            details.append(notes);
+        }
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'btn btn-secondary';
+        removeButton.textContent = 'Remove from schedule';
+        removeButton.addEventListener('click', () => removeScheduledOperation(operation.id));
+        item.append(details, removeButton);
+        list.append(item);
+    });
+}
+
+function setupAdminOperationForm() {
+    const form = document.getElementById('admin-operation-form');
+    const status = document.getElementById('admin-operation-status');
+    if (!form || !status) return;
+    document.getElementById('admin-operation-date').min = new Date().toISOString().split('T')[0];
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submit = form.querySelector('button[type="submit"]');
+        const payload = {
+            doctorId: Number(document.getElementById('admin-operation-doctor').value),
+            procedure: document.getElementById('admin-operation-procedure').value.trim(),
+            date: document.getElementById('admin-operation-date').value,
+            time: document.getElementById('admin-operation-time').value,
+            location: document.getElementById('admin-operation-location').value.trim(),
+            notes: document.getElementById('admin-operation-notes').value.trim()
+        };
+
+        submit.disabled = true;
+        status.textContent = 'Scheduling operation...';
+        try {
+            const response = await apiCall('/operations', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok) {
+                status.textContent = result.error || 'Unable to schedule operation.';
+                return;
+            }
+
+            form.reset();
+            await loadAdminDashboard();
+            status.textContent = 'Operation added to the schedule.';
+        } catch (error) {
+            console.error('Error scheduling operation:', error);
+            status.textContent = 'Unable to schedule operation right now.';
+        } finally {
+            submit.disabled = false;
+        }
+    });
+}
+
+async function removeScheduledOperation(operationId) {
+    if (!window.confirm('Remove this operation from the schedule?')) return;
+
+    const status = document.getElementById('admin-operation-status');
+    try {
+        const response = await apiCall(`/operations/${Number(operationId)}`, { method: 'DELETE' });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            if (status) status.textContent = result.error || 'Unable to remove operation.';
+            return;
+        }
+        await loadAdminDashboard();
+        if (status) status.textContent = 'Operation removed from the schedule.';
+    } catch (error) {
+        console.error('Error removing operation:', error);
+        if (status) status.textContent = 'Unable to remove operation right now.';
     }
 }
 
@@ -4909,6 +4999,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAdminBulletinForm();
     setupAdminMourningForm();
     setupAdminDoctorForm();
+    setupAdminOperationForm();
     setupAdminPharmacyForm();
     setupWardBedForm();
     setupClinicalForms();

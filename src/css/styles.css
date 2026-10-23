@@ -5268,6 +5268,49 @@ body.dashboard [hidden] {
     margin-top: 8px;
 }
 
+.admin-operation-form {
+    margin-bottom: 16px;
+}
+
+.admin-operation-list {
+    display: grid;
+    gap: 10px;
+}
+
+.admin-operation-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 14px;
+    border: 1px solid #e2e8ed;
+    border-radius: 6px;
+}
+
+.admin-operation-details {
+    min-width: 0;
+}
+
+.admin-operation-details p {
+    margin: 5px 0 0;
+}
+
+.admin-operation-item .btn {
+    flex: 0 0 auto;
+}
+
+.doctor-operations-list li {
+    display: grid;
+    gap: 4px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-gray);
+}
+
+.doctor-operations-list li:last-child {
+    border-bottom: 0;
+}
+
 .doctor-appointment-request-toggle {
     display: inline-flex;
     align-items: center;
