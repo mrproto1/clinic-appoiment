@@ -4028,6 +4028,54 @@ function setupAdminDoctorForm() {
     });
 }
 
+function setupDoctorAppointmentRequestToggle() {
+    const toggle = document.getElementById('doctor-appointment-requests-enabled');
+    const status = document.getElementById('doctor-appointment-requests-status');
+    if (!toggle || !status || currentUser.role !== 'doctor') return;
+
+    toggle.checked = currentUser.appointmentRequestsEnabled !== false;
+    status.textContent = toggle.checked
+        ? 'Patients can request new appointments with you.'
+        : 'New requests are off. Existing appointments remain scheduled.';
+
+    toggle.addEventListener('change', async () => {
+        const requestedState = toggle.checked;
+        toggle.disabled = true;
+        status.textContent = 'Saving appointment request setting...';
+
+        try {
+            const response = await apiCall('/users/me/appointment-requests', {
+                method: 'PUT',
+                body: JSON.stringify({ enabled: requestedState })
+            });
+            if (!response) {
+                toggle.checked = !requestedState;
+                status.textContent = 'Your session expired. Sign in again to change this setting.';
+                return;
+            }
+
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                toggle.checked = !requestedState;
+                status.textContent = result.error || 'Unable to update appointment requests.';
+                return;
+            }
+
+            currentUser.appointmentRequestsEnabled = result.appointmentRequestsEnabled === true;
+            localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            toggle.checked = currentUser.appointmentRequestsEnabled;
+            status.textContent = toggle.checked
+                ? 'Patients can request new appointments with you.'
+                : 'New requests are off. Existing appointments remain scheduled.';
+        } catch (error) {
+            toggle.checked = !requestedState;
+            status.textContent = 'Unable to update appointment requests right now.';
+        } finally {
+            toggle.disabled = false;
+        }
+    });
+}
+
 function setupAdminPharmacyForm() {
     const form = document.getElementById('admin-pharmacy-form');
     const status = document.getElementById('admin-pharmacy-status');
@@ -4856,6 +4904,7 @@ function openRoleAlerts() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     setupDashboardTools();
+    setupDoctorAppointmentRequestToggle();
     setupStaffPatientForm();
     setupAdminBulletinForm();
     setupAdminMourningForm();

@@ -59,7 +59,8 @@ async function loadAvailability(doctorId, dateInput, slotContainer, dateLabel, t
         return;
     }
     if (!response.data.slots.length) {
-        slotContainer.innerHTML = '<p class="muted-text">No future slots are available on this date.</p>';
+        const message = response.data.message || 'No future slots are available on this date.';
+        slotContainer.innerHTML = `<p class="muted-text">${message}</p>`;
         return;
     }
 

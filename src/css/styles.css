@@ -5268,6 +5268,26 @@ body.dashboard [hidden] {
     margin-top: 8px;
 }
 
+.doctor-appointment-request-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    margin: 8px 0;
+    font-weight: 700;
+}
+
+.doctor-appointment-request-toggle input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    padding: 0;
+    accent-color: #0f766e;
+}
+
+.doctor-appointment-request-card #doctor-appointment-requests-status {
+    margin: 4px 0 0;
+}
+
 .admin-doctor-card {
     min-width: 0;
     padding: 15px;

@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=home-nav-dashboard-active-20261017">
+    <link rel="stylesheet" href="css/styles.css?v=doctor-appointment-toggle-20261023">
     <script src="js/runtime-config.js?v=vercel-api-migration-20261022" defer></script>
     <script src="js/auth.js?v=family-access-validation-20261017" defer></script>
-    <script src="js/dashboard.js?v=donor-code-20261021" defer></script>
+    <script src="js/dashboard.js?v=doctor-appointment-toggle-20261023" defer></script>
     <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
 </head>
 <body class="dashboard">
@@ -154,6 +154,15 @@
                         <input type="text" placeholder="Search patients...">
                     </div>
                 </div>
+            </div>
+
+            <div class="card doctor-appointment-request-card">
+                <h3>Appointment requests</h3>
+                <label class="doctor-appointment-request-toggle">
+                    <input type="checkbox" id="doctor-appointment-requests-enabled">
+                    <span>Accept new appointment requests</span>
+                </label>
+                <p id="doctor-appointment-requests-status" class="muted-text" role="status" aria-live="polite"></p>
             </div>
 
             <div id="doctor-stats" class="grid"></div>

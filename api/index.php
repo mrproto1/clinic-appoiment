@@ -747,11 +747,21 @@ function sanitize_user($user)
         'email' => $user['email'] ?? null,
         'phone' => $user['phone'] ?? null,
         'department' => $user['department'] ?? null,
+        'appointmentRequestsEnabled' => ($user['role'] ?? '') === 'doctor' ? doctor_accepts_appointment_requests($user) : null,
         'linkedPatientId' => isset($user['linkedPatientId']) ? (int)$user['linkedPatientId'] : null,
         'linkedPatientEmail' => $user['linkedPatientEmail'] ?? null,
         'linkedPatientName' => $user['linkedPatientName'] ?? null,
         'relationship' => $user['relationship'] ?? null
     ];
+}
+
+function doctor_accepts_appointment_requests($doctor)
+{
+    if (!array_key_exists('appointmentRequestsEnabled', $doctor)) {
+        return true;
+    }
+
+    return filter_var($doctor['appointmentRequestsEnabled'], FILTER_VALIDATE_BOOLEAN);
 }
 
 function find_patient_for_user($user)
@@ -1503,7 +1513,7 @@ function handle_user_routes($method, $segments, $body)
 {
     if ($method === 'GET' && count($segments) === 3 && $segments[1] === 'role' && $segments[2] === 'doctor') {
         $doctors = array_values(array_filter(read_data('users'), function ($item) {
-            return ($item['role'] ?? '') === 'doctor';
+            return ($item['role'] ?? '') === 'doctor' && doctor_accepts_appointment_requests($item);
         }));
 
         // Keep one doctor profile per real doctor name (lowest ID wins) to avoid duplicate selections.
@@ -1537,6 +1547,18 @@ function handle_user_routes($method, $segments, $body)
     }
 
     $user = require_auth();
+
+    if ($method === 'PUT' && count($segments) === 3 && $segments[1] === 'me' && $segments[2] === 'appointment-requests') {
+        if (($user['role'] ?? '') !== 'doctor') {
+            respond(403, ['error' => 'Only doctors can change their appointment request status']);
+        }
+        if (!array_key_exists('enabled', $body) || !is_bool($body['enabled'])) {
+            respond(400, ['error' => 'The enabled field must be true or false']);
+        }
+
+        $updated = update_row('users', (int)$user['id'], ['appointmentRequestsEnabled' => $body['enabled']]);
+        respond(200, ['appointmentRequestsEnabled' => doctor_accepts_appointment_requests($updated)]);
+    }
 
     if ($method === 'GET' && count($segments) === 1) {
         if ($user['role'] !== 'admin') {
@@ -1758,6 +1780,18 @@ function handle_appointment_routes($method, $segments, $body)
         if (!$doctor || ($doctor['role'] ?? '') !== 'doctor') {
             respond(404, ['error' => 'Doctor not found']);
         }
+        if (!doctor_accepts_appointment_requests($doctor)) {
+            respond(200, [
+                'doctorId' => $doctorId,
+                'date' => $date,
+                'booked' => [],
+                'onLeave' => false,
+                'leaveReason' => null,
+                'acceptingAppointmentRequests' => false,
+                'message' => 'This doctor is not accepting new appointment requests.',
+                'slots' => []
+            ]);
+        }
 
         $booked = array_values(array_filter(read_data('appointments'), function ($item) use ($doctorId, $date) {
             return (int)($item['doctorId'] ?? 0) === $doctorId
@@ -1792,6 +1826,7 @@ function handle_appointment_routes($method, $segments, $body)
             'booked' => $bookedTimes,
             'onLeave' => (bool)$approvedLeave,
             'leaveReason' => $approvedLeave['reason'] ?? null,
+            'acceptingAppointmentRequests' => true,
             'slots' => $slots
         ]);
     }
@@ -1842,6 +1877,10 @@ function handle_appointment_routes($method, $segments, $body)
         // Canonical doctor profile: if duplicates exist, map to lowest doctor ID by same name.
         $canonicalDoctor = get_canonical_doctor($doctor);
         $doctorId = (int)$canonicalDoctor['id'];
+
+        if (!doctor_accepts_appointment_requests($canonicalDoctor)) {
+            respond(409, ['error' => 'This doctor is not accepting new appointment requests']);
+        }
 
         $department = $canonicalDoctor['department'] ?? 'General Medicine';
         if (!is_doctor_schedule_valid($date, $time, $department)) {
