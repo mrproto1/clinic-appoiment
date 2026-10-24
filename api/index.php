@@ -2112,8 +2112,39 @@ function handle_appointment_routes($method, $segments, $body)
             $doctorName = (string)($appointment['doctorName'] ?? 'the doctor');
             $message = 'Your appointment with ' . $doctorName . ' on ' . ($appointment['date'] ?? '') . ' at ' . ($appointment['time'] ?? '') . ' was cancelled. Reason: ' . $reason;
             notify_appointment_contacts($appointment, 'appointment-cancelled', 'Appointment cancelled', $message, ['appointmentId' => $appointmentId]);
-            audit_event($user, 'appointment-cancelled', 'appointment', $appointmentId, ['appointmentId' => $appointmentId, 'reason' => $reason]);
-            respond(200, ['message' => 'Appointment cancelled and patient/family notified', 'appointment' => $updated]);
+            $patientEmail = trim((string)($appointment['patientEmail'] ?? ''));
+            if (filter_var($patientEmail, FILTER_VALIDATE_EMAIL)) {
+                $patientName = trim((string)($appointment['patientName'] ?? ''));
+                $greeting = $patientName !== '' ? 'Hello ' . $patientName . ',' : 'Hello,';
+                $emailText = $greeting . "\n\n"
+                    . 'Your appointment with ' . $doctorName . ' scheduled for '
+                    . ($appointment['date'] ?? '') . ' at ' . ($appointment['time'] ?? '')
+                    . " has been cancelled.\n\n"
+                    . "Please contact the clinic if you would like to arrange a new appointment.\n\n"
+                    . 'The Protocol Hospital';
+                $emailResult = send_bird_email(
+                    $patientEmail,
+                    'Your appointment has been cancelled',
+                    $emailText,
+                    'appointment-cancelled-' . $appointmentId
+                );
+            } else {
+                $emailResult = ['accepted' => false, 'error' => 'The appointment does not have a valid patient email address'];
+            }
+
+            audit_event($user, 'appointment-cancelled', 'appointment', $appointmentId, [
+                'appointmentId' => $appointmentId,
+                'reason' => $reason,
+                'patientEmailAccepted' => $emailResult['accepted']
+            ]);
+            respond(200, [
+                'message' => $emailResult['accepted']
+                    ? 'Appointment cancelled and cancellation email sent to the patient.'
+                    : 'Appointment cancelled, but the cancellation email could not be sent.',
+                'emailAccepted' => $emailResult['accepted'],
+                'emailError' => $emailResult['error'],
+                'appointment' => $updated
+            ]);
         }
 
         if ($action === 'reassign-doctor') {

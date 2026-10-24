@@ -832,7 +832,10 @@ async function cancelDoctorAppointment(appointmentId) {
         const result = response ? await response.json().catch(() => ({})) : {};
 
         if (response && response.ok) {
-            showNotification(result.message || 'Appointment cancelled and patient/family notified.', 'success');
+            showNotification(
+                result.message || 'Appointment cancelled.',
+                result.emailAccepted === false ? 'danger' : 'success'
+            );
             await loadDoctorDashboard();
             return;
         }
