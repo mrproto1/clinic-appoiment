@@ -297,9 +297,8 @@ async function initOrganDonorTribute() {
 
 function printDonorCertificate(donor) {
     const certificateNumber = `OD-${String(donor.id).padStart(5, '0')}`;
-    const signatureBase = getLocalApiBase().replace(/\/api$/, '/src/images');
-    const muhammadSignature = `${signatureBase}/signature-muhammad-irfan.png`;
-    const aizulSignature = `${signatureBase}/signature-aizul-eirfan.png`;
+    const muhammadSignature = new URL('../images/signature-muhammad-irfan.png', window.location.href).href;
+    const aizulSignature = new URL('../images/signature-aizul-eirfan.png', window.location.href).href;
     const issuedDate = new Date(donor.createdAt || Date.now()).toLocaleDateString([], {
         day: 'numeric', month: 'long', year: 'numeric'
     });
