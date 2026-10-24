@@ -161,6 +161,7 @@ function redirectToDashboard(role) {
     const dashboardMap = {
         'doctor': 'dashboard.html?role=doctor',
         'staff': 'dashboard.html?role=staff',
+        'pharmacy': 'dashboard.html?role=pharmacy',
         'admin': 'dashboard.html?role=admin',
         'patient': 'dashboard.html?role=patient',
         'family': 'dashboard.html?role=family'
