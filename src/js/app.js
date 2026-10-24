@@ -144,7 +144,6 @@ async function initPublicDoctorDirectory() {
             placeholder.className = 'doctor-photo-placeholder';
             placeholder.setAttribute('aria-hidden', 'true');
             placeholder.textContent = initialsFor(doctor.name);
-            media.append(placeholder);
 
             const normalizedName = normalizeDoctorName(doctor.name);
             const photo = photos[normalizedName];
@@ -154,8 +153,13 @@ async function initPublicDoctorDirectory() {
                 image.src = `../images/${photo}`;
                 image.alt = doctor.name || 'Doctor portrait';
                 image.loading = 'lazy';
-                image.addEventListener('error', () => image.remove(), { once: true });
+                image.addEventListener('error', () => {
+                    image.remove();
+                    media.append(placeholder);
+                }, { once: true });
                 media.append(image);
+            } else {
+                media.append(placeholder);
             }
 
             const heading = document.createElement('div');
