@@ -91,6 +91,9 @@ async function initPublicDoctorDirectory() {
         muhammadhazim: 'Hazim.png',
         helmizareef: 'Helmi.png'
     };
+    const doctorBios = {
+        aizuleirfan: 'Focuses on how the nervous system affects vision, including conditions involving the eyes, optic nerves, and visual pathways.'
+    };
     const initialsFor = (name) => String(name || 'Doctor').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0].toUpperCase()).join('');
     const normalizeDoctorName = (name) => String(name || '').toLowerCase().replace(/^dr\.?\s*/, '').replace(/[^a-z0-9]/g, '');
 
@@ -164,22 +167,28 @@ async function initPublicDoctorDirectory() {
             specialty.textContent = doctor.department || 'General Medicine';
             heading.append(name, specialty);
 
-            const email = document.createElement('p');
-            email.className = 'doctor-email';
-            if (doctor.email) {
-                const link = document.createElement('a');
-                link.href = `mailto:${doctor.email}`;
-                link.textContent = doctor.email;
-                email.append(link);
+            const details = document.createElement('p');
+            const bio = doctorBios[normalizedName];
+            if (bio) {
+                details.className = 'bio';
+                details.textContent = bio;
             } else {
-                email.textContent = 'Contact the hospital for appointment support.';
+                details.className = 'doctor-email';
+                if (doctor.email) {
+                    const link = document.createElement('a');
+                    link.href = `mailto:${doctor.email}`;
+                    link.textContent = doctor.email;
+                    details.append(link);
+                } else {
+                    details.textContent = 'Contact the hospital for appointment support.';
+                }
             }
 
             const appointment = document.createElement('a');
             appointment.href = `appointments.html?doctorId=${encodeURIComponent(doctor.id)}`;
             appointment.className = 'button doctor-appointment-link';
             appointment.textContent = 'Book Appointment';
-            card.append(media, heading, email, appointment);
+            card.append(media, heading, details, appointment);
             card.style.setProperty('--reveal-delay', `${Math.min(index * 60, 360)}ms`);
             return card;
         });
