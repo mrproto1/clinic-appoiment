@@ -7,10 +7,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="../css/styles.css?v=family-access-validation-20261017">
+    <link rel="stylesheet" href="../css/styles.css?v=caregiver-planner-20261104">
     <script src="../js/runtime-config.js?v=vercel-api-migration-20261022" defer></script>
-    <script src="../js/auth.js?v=family-duplicate-guidance-20261017" defer></script>
-    <script src="../js/faq-chat.js?v=20260928-family" defer></script>
+    <script src="../js/auth.js?v=private-family-planner-20261104" defer></script>
 </head>
 <body class="contact-page">
     <header class="contact-nav">
@@ -34,8 +33,8 @@
         <section class="contact-hero">
             <div>
                 <p class="contact-kicker">The Protocol · Family portal</p>
-                <h1>Stay close<br><em>to their care.</em></h1>
-                <p>Create a family account linked to the email on the patient's hospital record.</p>
+                <h1>Care for others.<br><em>Plan your way.</em></h1>
+                <p>Use a private checklist to organise your support tasks. Family Access does not connect to patient records.</p>
             </div>
             <div class="contact-signal" aria-hidden="true">
                 <span class="contact-signal-core"></span>
@@ -54,7 +53,7 @@
                 </div>
                 <div id="family-create-panel" role="tabpanel" aria-labelledby="family-create-tab">
                     <h2>Create an account</h2>
-                    <p>Enter your details and the patient's registered email to link the account.</p>
+                    <p>Create your own account. No patient details are needed.</p>
                     <form id="familySignupForm">
                         <div class="form-group">
                             <label for="signup-name">Your name</label>
@@ -71,14 +70,6 @@
                         <div class="form-group">
                             <label for="signup-password">Password</label>
                             <input type="password" id="signup-password" name="signup-password" autocomplete="new-password" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="linked-patient-email">Patient's registered email</label>
-                            <input type="email" id="linked-patient-email" name="linked-patient-email" autocomplete="off" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="relationship">Relationship to patient</label>
-                            <input type="text" id="relationship" name="relationship" placeholder="Spouse, parent, child" required>
                         </div>
                         <button type="submit" class="btn btn-primary contact-submit">Create Family Account</button>
                         <div id="signupMessage" class="success-message" role="status" aria-live="polite"></div>
@@ -104,40 +95,12 @@
 
             <aside class="contact-info-section">
                 <p class="contact-eyebrow">Family account</p>
-                <h2>Stay connected</h2>
-                <p>New accounts need the email saved on the patient's hospital record. Returning family members can sign in with their own account email and password.</p>
+                <h2>Private by design</h2>
+                <p>Your planner tasks stay in this browser. They are not linked to patient records or sent to the hospital. Avoid entering names or medical information, and sign out on shared devices.</p>
                 <a class="protocol-cta-ghost" href="../index.html">Back to Home</a>
             </aside>
         </div>
     </main>
-    <div class="faq-chat" id="faq-chat">
-        <section class="faq-chat-panel" id="faq-chat-panel" aria-label="Family support assistant" hidden>
-            <header class="faq-chat-header">
-                <div>
-                    <p class="faq-chat-eyebrow">THE PROTOCOL · FAMILY</p>
-                    <h2>Family support</h2>
-                </div>
-                <button class="faq-chat-close" type="button" aria-label="Close assistant">×</button>
-            </header>
-            <div class="faq-chat-messages" id="faq-chat-messages" role="log" aria-live="polite" aria-relevant="additions">
-                <p class="faq-chat-message is-assistant">I can help with Family Access and general questions. If you're worried about your loved one's condition, contact their care team. For an emergency, call local emergency services. Please don't share names, records, or medical details here.</p>
-            </div>
-            <div class="faq-chat-suggestions" aria-label="Suggested questions">
-                <button type="button" data-chat-suggestion="I'm worried about my family member. What should I do?">I'm worried</button>
-                <button type="button" data-chat-suggestion="How can I access my family member's updates?">Access updates</button>
-            </div>
-            <form class="faq-chat-form" id="faq-chat-form">
-                <label class="visually-hidden" for="faq-chat-input">Ask a family support question</label>
-                <input id="faq-chat-input" name="message" type="text" maxlength="1200" placeholder="Ask a general question…" autocomplete="off" required>
-                <button type="submit" aria-label="Send message">Send</button>
-            </form>
-            <p class="faq-chat-disclaimer">Not medical advice. Contact the care team about health concerns.</p>
-        </section>
-        <button class="faq-chat-toggle" type="button" aria-expanded="false" aria-controls="faq-chat-panel">
-            <span class="faq-chat-toggle-mark" aria-hidden="true">✦</span>
-            <span>Need family support?</span>
-        </button>
-    </div>
     <script>
         const familyTabs = [...document.querySelectorAll('.family-access-tabs [role="tab"]')];
         familyTabs.forEach((tab) => {

@@ -4,11 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Dashboard</title>
-    <link rel="stylesheet" href="css/styles.css?v=admin-operation-schedule-20261023">
+    <link rel="stylesheet" href="css/styles.css?v=caregiver-planner-20261104">
     <script src="js/runtime-config.js?v=vercel-api-migration-20261022" defer></script>
-    <script src="js/auth.js?v=pharmacy-login-20261024" defer></script>
-    <script src="js/dashboard.js?v=appointment-cancel-email-20261024" defer></script>
-    <script src="js/faq-chat.js?v=family-record-chat-20260928" defer></script>
+    <script src="js/auth.js?v=private-family-planner-20261104" defer></script>
+    <script src="js/dashboard.js?v=private-family-planner-20261104" defer></script>
 </head>
 <body class="dashboard">
     <!-- SIDEBAR -->
@@ -100,7 +99,7 @@
                     <a href="#" onclick="openPatientMessages()" class="nav-link">Doctors</a>
                 </li>
                 <li id="family-menu" style="display: none;">
-                    <a href="#" onclick="switchSection('family-section')" class="nav-link">Family Health</a>
+                    <a href="#" onclick="switchSection('family-section')" class="nav-link">Caregiver Planner</a>
                 </li>
             </ul>
         </nav>
@@ -621,7 +620,7 @@
             <div class="header">
                 <h1>Pharmacy Stock</h1>
             </div>
-            <p class="admin-doctor-intro">Manage medicine quantities and low-stock thresholds. Nurse approval deducts requested units from stock.</p>
+            <p class="admin-doctor-intro">Manage medicine quantities and low-stock thresholds. The starter catalog uses generic names and starts at zero stock; verify your hospital formulary and physical inventory before dispensing. Nurse approval deducts requested units from stock.</p>
             <div class="card">
                 <h3>Add medicine</h3>
                 <form id="medicine-stock-form" class="medicine-stock-form">
@@ -941,45 +940,29 @@
 
         <div id="family-section" class="content-section">
             <div class="header">
-                <h1>👨‍👩‍👧 Family Health Overview</h1>
+                <h1>Caregiver Planner</h1>
             </div>
-            <div id="family-urgent-alerts" class="family-urgent-alert-list" aria-live="assertive"></div>
-            <div id="family-content"></div>
-            <section id="family-clinical" class="card family-clinical" aria-labelledby="family-clinical-title">
-                <h3 id="family-clinical-title">Medicine requests &amp; blood results</h3>
-                <p class="muted-text">Only items approved by the doctor and nurse appear here.</p>
-                <form id="family-medicine-request-form" class="family-medicine-request-form">
-                    <h4>Request medicine</h4>
-                    <div class="clinical-field-row">
-                        <div class="form-group">
-                            <label for="family-medicine-request-name">Medicine requested</label>
-                            <input id="family-medicine-request-name" type="text" maxlength="120" placeholder="Medicine name" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="family-medicine-request-note">Reason / note</label>
-                            <input id="family-medicine-request-note" type="text" maxlength="300" placeholder="Optional note for the doctor">
-                        </div>
+            <section class="card caregiver-planner" aria-labelledby="caregiver-planner-title">
+                <p class="eyebrow">Private to this browser</p>
+                <h2 id="caregiver-planner-title">Plan your support tasks</h2>
+                <p class="caregiver-planner-privacy">
+                    This checklist is saved only in this browser and is not connected to patient records or shared with the hospital.
+                    Do not enter patient names, medical details, or other sensitive information. Anyone with access to this browser profile may see these tasks.
+                </p>
+                <form id="caregiver-planner-form" class="caregiver-planner-form">
+                    <div class="form-group">
+                        <label for="caregiver-task-title">Task</label>
+                        <input id="caregiver-task-title" type="text" maxlength="120" placeholder="Prepare questions for a visit" required>
                     </div>
-                    <button class="btn btn-primary" type="submit">Send to doctor</button>
-                    <p id="family-medicine-request-status" class="form-status" role="status" aria-live="polite"></p>
+                    <div class="form-group">
+                        <label for="caregiver-task-date">Due date (optional)</label>
+                        <input id="caregiver-task-date" type="date">
+                    </div>
+                    <button class="btn btn-primary" type="submit">Add task</button>
                 </form>
-                <div id="family-clinical-list" class="clinical-list"></div>
-                <div id="family-blood-trends" class="family-blood-trends"></div>
-            </section>
-            <section id="family-appointments" class="card family-appointments">
-                <h3>Appointments</h3>
-                <p class="muted-text">Confirm an upcoming appointment or request a different time.</p>
-                <div id="family-appointment-list" class="family-appointment-list"></div>
-            </section>
-            <section id="family-medical-documents" class="card family-medical-documents">
-                <h3>Medical documents</h3>
-                <p class="muted-text">Private files attached to the linked patient record.</p>
-                <div id="family-medical-document-list" class="medical-document-list"></div>
-            </section>
-            <section id="family-death-records" class="card family-death-records" aria-labelledby="family-death-title">
-                <h3 id="family-death-title">Hospital death records</h3>
-                <p class="death-record-notice">Approved hospital record copies only. Not valid as government-issued death certificates.</p>
-                <div id="family-death-list" class="death-record-list"></div>
+                <p id="caregiver-planner-status" class="form-status" role="status" aria-live="polite"></p>
+                <ul id="caregiver-planner-list" class="caregiver-planner-list" aria-label="Caregiver tasks"></ul>
+                <button id="caregiver-planner-clear" class="btn btn-secondary" type="button">Clear all tasks</button>
             </section>
         </div>
 
@@ -1075,46 +1058,6 @@
         </div>
     </div>
 
-    <div class="faq-chat" id="faq-chat" data-family-only="true" hidden>
-        <section class="faq-chat-panel" id="faq-chat-panel" aria-label="Family health assistant" hidden>
-            <header class="faq-chat-header">
-                <div>
-                    <p class="faq-chat-eyebrow">THE PROTOCOL · FAMILY</p>
-                    <h2>Family health assistant</h2>
-                </div>
-                <button class="faq-chat-close" type="button" aria-label="Close assistant">×</button>
-            </header>
-            <div class="faq-chat-messages" id="faq-chat-messages" role="log" aria-live="polite" aria-relevant="additions">
-                <p class="faq-chat-message is-assistant">I can summarize the latest readings linked to your family account if you choose to share them. I can't diagnose or determine a patient's condition. Please don't include names or identifying details.</p>
-            </div>
-            <div class="faq-chat-consent">
-                <label>
-                    <input type="checkbox" id="faq-chat-family-consent">
-                    <span>I agree to send my message to OpenAI for an answer. I will not include names, IDs, or other identifying details.</span>
-                </label>
-                <label>
-                    <input type="checkbox" id="faq-chat-share-vitals">
-                    <span>Include the linked record's latest HR, BP, respiratory rate, SpO₂, temperature, and timestamp. I have permission to share these readings with OpenAI.</span>
-                </label>
-                <p class="faq-chat-consent-error" id="faq-chat-consent-error" role="alert" hidden>Please agree before sending a message.</p>
-            </div>
-            <div class="faq-chat-suggestions" aria-label="Suggested questions">
-                <button type="button" data-chat-suggestion="I'm worried about my family member. Can you summarize the readings I chose to share?">Summarize readings</button>
-                <button type="button" data-chat-suggestion="What should I do if I'm worried about my family member?">I'm worried</button>
-            </div>
-            <form class="faq-chat-form" id="faq-chat-form">
-                <label class="visually-hidden" for="faq-chat-input">Ask the family health assistant</label>
-                <input id="faq-chat-input" name="message" type="text" maxlength="1200" placeholder="Ask a general question…" autocomplete="off" required>
-                <button type="submit" aria-label="Send message">Send</button>
-            </form>
-            <p class="faq-chat-disclaimer">Not medical advice. No readings are shared unless selected. Contact the care team about health concerns.</p>
-        </section>
-        <button class="faq-chat-toggle" type="button" aria-expanded="false" aria-controls="faq-chat-panel">
-            <span class="faq-chat-toggle-mark" aria-hidden="true">✦</span>
-            <span>Ask about family health</span>
-        </button>
-    </div>
-
     <script>
         // Menu item display based on role
         function showRoleMenu(role) {
@@ -1124,7 +1067,7 @@
                 'pharmacy': ['pharmacy-menu'],
                 'admin': ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7', 'admin-menu-8'],
                 'patient': ['patient-menu', 'patient-menu-2'],
-                'family': ['patient-menu', 'family-menu']
+                'family': ['family-menu']
             };
 
             Object.values(menus).flat().forEach(menu => {

@@ -21,7 +21,6 @@ let doctorVitalsHistoryByPatient = {};
 let medicineStockCache = [];
 let doctorEcgStateByPatient = {};
 const familyDemoVitalsByPatient = new Map();
-let familyHospitalAlertSignature = '';
 const MAX_RECONNECT_ATTEMPTS = 5;
 const CODE_BLUE_POLL_MS = 5000;
 const RATE_LIMIT_BACKOFF_MS = 60000;
@@ -75,7 +74,7 @@ const DASHBOARD_API_BASE = resolveApiBase();
 
 // Initialize WebSocket for real-time updates
 function initWebSocket() {
-    if (!isLoggedIn()) return;
+    if (!isLoggedIn() || currentUser.role === 'family') return;
 
     if (realtimePollTimer) {
         clearInterval(realtimePollTimer);
@@ -131,45 +130,8 @@ function getCodeBlueSeenKey() {
     return `codeBlueSeenAt:${currentUser.id || 'guest'}`;
 }
 
-function getFamilyLinkedPatientContext() {
-    if (!currentUser || currentUser.role !== 'family') {
-        return null;
-    }
-
-    return {
-        patientId: Number(currentUser.linkedPatientId || 0),
-        patientName: String(currentUser.linkedPatientName || '').trim().toLowerCase(),
-        patientEmail: String(currentUser.linkedPatientEmail || '').trim().toLowerCase()
-    };
-}
-
-function messageMatchesLinkedPatient(message, familyContext) {
-    if (!message || !familyContext) {
-        return true;
-    }
-
-    const metadata = message.metadata || {};
-    const patientId = Number(metadata.patientId || 0);
-    const patientName = String(metadata.patientName || '').trim().toLowerCase();
-    const patientEmail = String(metadata.patientEmail || '').trim().toLowerCase();
-
-    if (familyContext.patientId > 0 && patientId > 0 && familyContext.patientId === patientId) {
-        return true;
-    }
-
-    if (familyContext.patientName && patientName && familyContext.patientName === patientName) {
-        return true;
-    }
-
-    if (familyContext.patientEmail && patientEmail && familyContext.patientEmail === patientEmail) {
-        return true;
-    }
-
-    return false;
-}
-
 async function pollCodeBlueAlerts() {
-    if (!isLoggedIn()) return;
+    if (!isLoggedIn() || currentUser.role === 'family') return;
 
     try {
         const response = await apiCall('/messages/group/all');
@@ -179,12 +141,7 @@ async function pollCodeBlueAlerts() {
         const messages = await response.json();
         if (!Array.isArray(messages) || !messages.length) return;
 
-        const familyContext = getFamilyLinkedPatientContext();
-        const relevantMessages = familyContext
-            ? messages.filter((item) => item && item.type === 'code-blue' && messageMatchesLinkedPatient(item, familyContext))
-            : messages.filter((item) => item && item.type === 'code-blue');
-
-        const latestCodeBlue = [...relevantMessages]
+        const latestCodeBlue = [...messages.filter((item) => item && item.type === 'code-blue')]
             .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))[0];
 
         if (!latestCodeBlue) return;
@@ -227,16 +184,6 @@ function handleWebSocketMessage(data) {
             break;
         case 'code-blue': {
             const alert = data.alert || {};
-            const familyContext = getFamilyLinkedPatientContext();
-            if (familyContext && !messageMatchesLinkedPatient({
-                metadata: alert.metadata || {
-                    patientId: alert.patientId,
-                    patientName: alert.patientName,
-                    patientEmail: alert.patientEmail
-                }
-            }, familyContext)) {
-                break;
-            }
             showNotification(`🚨 CODE BLUE: ${data.alert.message}`, 'danger');
             showCodeBlueOverlay(alert.message || 'Immediate assistance is required.');
             break;
@@ -306,7 +253,7 @@ function showNotification(message, type = 'info') {
 }
 
 async function loadUserNotifications() {
-    if (!isLoggedIn() || document.hidden) return;
+    if (!isLoggedIn() || currentUser.role === 'family' || document.hidden) return;
     try {
         const response = await apiCall('/notifications');
         if (!response || !response.ok) return;
@@ -446,7 +393,19 @@ async function triggerFamilyCodeBlueContact(patient, roomNumber, note) {
 async function initializeDashboard() {
     if (!requireAuth()) return;
 
-    const role = new URLSearchParams(window.location.search).get('role') || currentUser.role;
+    const role = currentUser.role;
+    if (role === 'family') {
+        delete currentUser.linkedPatient;
+        delete currentUser.linkedPatientId;
+        delete currentUser.linkedPatientEmail;
+        delete currentUser.linkedPatientName;
+        delete currentUser.relationship;
+        try {
+            localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        } catch (error) {
+            console.error('Unable to clear old family patient-link data from this browser:', error);
+        }
+    }
 
     if (typeof window.showRoleMenu === 'function') {
         window.showRoleMenu(role);
@@ -460,19 +419,20 @@ async function initializeDashboard() {
     updateDashboardHero(currentUser.name, currentUser.role);
     showRoleBasedSections(role);
 
-    // Initialize WebSocket for real-time updates
-    initWebSocket();
-    pollCodeBlueAlerts();
-    loadUserNotifications();
-    if (notificationPollTimer) clearInterval(notificationPollTimer);
-    notificationPollTimer = setInterval(loadUserNotifications, 30000);
+    if (role !== 'family') {
+        initWebSocket();
+        pollCodeBlueAlerts();
+        loadUserNotifications();
+        if (notificationPollTimer) clearInterval(notificationPollTimer);
+        notificationPollTimer = setInterval(loadUserNotifications, 30000);
 
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            pollCodeBlueAlerts();
-            loadUserNotifications();
-        }
-    });
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                pollCodeBlueAlerts();
+                loadUserNotifications();
+            }
+        });
+    }
 
     if (role === 'doctor') {
         loadDoctorDirectory().then(() => loadDoctorDashboard());
@@ -506,7 +466,7 @@ function showDashboardRoleMenu(role) {
         pharmacy: ['pharmacy-menu'],
         admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7', 'admin-menu-8', 'admin-menu-9'],
         patient: ['patient-menu', 'patient-menu-2'],
-        family: ['family-menu', 'patient-menu', 'patient-menu-2']
+        family: ['family-menu']
     };
 
     Object.values(menuIds).flat().forEach((id) => {
@@ -562,6 +522,12 @@ function updateDashboardHero(name, role) {
     const title = document.getElementById('dashboard-welcome');
     const detail = document.getElementById('dashboard-welcome-detail');
     if (!title || !detail) return;
+
+    if (role === 'family') {
+        title.textContent = `Welcome back, ${name}`;
+        detail.textContent = 'Your private caregiver planner is ready. Tasks stay in this browser and are not linked to patient records.';
+        return;
+    }
 
     const formattedRole = role === 'doctor'
         ? 'Doctor'
@@ -3806,11 +3772,19 @@ function renderMedicineStock(targetId, items, editable) {
     }
 
     container.replaceChildren(...items.map((item) => {
-        const row = clinicalEl('article', `medicine-stock-item${Number(item.quantity) <= Number(item.minimum) ? ' is-low' : ''}`);
+        const quantityValue = Number(item.quantity);
+        const minimumValue = Number(item.minimum);
+        const outOfStock = quantityValue === 0;
+        const lowStock = quantityValue > 0 && quantityValue <= minimumValue;
+        const row = clinicalEl('article', `medicine-stock-item${outOfStock || lowStock ? ' is-low' : ''}`);
         const details = clinicalEl('div', 'medicine-stock-details');
         details.append(clinicalEl('strong', '', item.name || 'Medicine'));
         details.append(clinicalEl('span', '', `${item.quantity} ${item.unit || 'units'} · Low stock at ${item.minimum ?? 0}`));
-        if (Number(item.quantity) <= Number(item.minimum)) details.append(clinicalEl('small', 'medicine-stock-warning', 'Low stock'));
+        if (outOfStock) {
+            details.append(clinicalEl('small', 'medicine-stock-warning', 'Out of stock — verify physical stock before dispensing'));
+        } else if (lowStock) {
+            details.append(clinicalEl('small', 'medicine-stock-warning', 'Low stock'));
+        }
         row.append(details);
 
         if (editable) {
@@ -4359,76 +4333,156 @@ async function loadPatientDashboard() {
     }
 }
 
-async function loadFamilyDashboard() {
-    const container = document.getElementById('family-content');
-    if (!container) return;
+function loadFamilyDashboard() {
+    const plannerForm = document.getElementById('caregiver-planner-form');
+    const taskInput = document.getElementById('caregiver-task-title');
+    const dateInput = document.getElementById('caregiver-task-date');
+    const taskList = document.getElementById('caregiver-planner-list');
+    const status = document.getElementById('caregiver-planner-status');
+    const clearButton = document.getElementById('caregiver-planner-clear');
+    const userId = String(currentUser?.id || '');
+    if (!plannerForm || !taskInput || !dateInput || !taskList || !status || !clearButton || !userId) return;
+    if (plannerForm.dataset.initialized === 'true') return;
+    plannerForm.dataset.initialized = 'true';
 
+    const storageKey = `protocol-caregiver-planner-v1:${userId}`;
+    let tasks = [];
     try {
-        const [response, messagesResponse] = await Promise.all([
-            apiCall('/patients/me'),
-            apiCall('/messages')
-        ]);
-        if (!response || !response.ok) {
-            container.innerHTML = `
-                <div class="card">
-                    <h3>Family Patient Information</h3>
-                    <p class="muted-text">This family profile is not linked to a patient record yet. Please ensure the patient email is registered correctly.</p>
-                </div>
-            `;
-            return;
+        const savedTasks = localStorage.getItem(storageKey);
+        if (savedTasks) {
+            const parsedTasks = JSON.parse(savedTasks);
+            if (!Array.isArray(parsedTasks)) throw new Error('Saved planner data is not a task list.');
+            tasks = parsedTasks.filter((task) =>
+                task
+                && typeof task.id === 'string'
+                && typeof task.title === 'string'
+                && task.title.length <= 120
+                && (task.dueDate === '' || /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate))
+                && typeof task.done === 'boolean'
+            );
+        }
+    } catch (error) {
+        console.error('Unable to read private caregiver planner:', error);
+        status.textContent = 'Unable to read saved tasks in this browser. Your saved data was not changed.';
+        clearButton.disabled = false;
+        clearButton.addEventListener('click', () => {
+            if (!window.confirm('Remove the unreadable planner data saved in this browser?')) return;
+            try {
+                localStorage.removeItem(storageKey);
+                window.location.reload();
+            } catch (removeError) {
+                console.error('Unable to clear private caregiver planner:', removeError);
+                status.textContent = 'Unable to clear planner data in this browser.';
+            }
+        }, { once: true });
+        return;
+    }
+
+    const saveTasks = () => {
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(tasks));
+            status.textContent = 'Saved in this browser only.';
+            return true;
+        } catch (error) {
+            console.error('Unable to save private caregiver planner:', error);
+            status.textContent = 'Unable to save tasks in this browser. Check browser storage settings.';
+            return false;
+        }
+    };
+
+    const formatDueDate = (dueDate) => {
+        if (!dueDate) return '';
+        const [year, month, day] = dueDate.split('-').map(Number);
+        return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(year, month - 1, day));
+    };
+
+    const renderTasks = () => {
+        taskList.replaceChildren();
+        const sortedTasks = [...tasks].sort((a, b) => {
+            if (a.done !== b.done) return Number(a.done) - Number(b.done);
+            if (!a.dueDate) return b.dueDate ? 1 : 0;
+            if (!b.dueDate) return -1;
+            return a.dueDate.localeCompare(b.dueDate);
+        });
+
+        if (sortedTasks.length === 0) {
+            const empty = document.createElement('li');
+            empty.className = 'caregiver-planner-empty';
+            empty.textContent = 'No tasks yet. Add a reminder for yourself above.';
+            taskList.append(empty);
         }
 
-        const patient = await response.json();
-        const messages = messagesResponse && messagesResponse.ok ? await messagesResponse.json() : [];
-        renderFamilyHospitalAlerts((Array.isArray(messages) ? messages : []).filter((message) =>
-            message.type === 'family-hospital-alert'
-            && Number(message.metadata?.patientId) === Number(patient.id)
-        ));
-        patientAssignedDoctorId = Number(patient.assignedDoctor) || null;
-        renderPatientHealthPanel(patient, 'family-content');
-        loadFamilyClinicalRecords();
-        loadFamilyDeathRecords();
-        loadFamilyAppointments();
-        loadMedicalDocuments('family-medical-document-list', Number(patient.id));
-    } catch (error) {
-        console.error('Error loading family dashboard:', error);
-        container.innerHTML = `
-            <div class="card">
-                <h3>Family Patient Information</h3>
-                <p class="muted-text">Unable to load the patient information right now.</p>
-            </div>
-        `;
-    }
-}
+        sortedTasks.forEach((task) => {
+            const item = document.createElement('li');
+            item.className = `caregiver-planner-item${task.done ? ' is-done' : ''}`;
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = task.done;
+            checkbox.setAttribute('aria-label', `Mark "${task.title}" ${task.done ? 'incomplete' : 'complete'}`);
+            checkbox.addEventListener('change', () => {
+                task.done = checkbox.checked;
+                saveTasks();
+                renderTasks();
+            });
 
-function renderFamilyHospitalAlerts(alerts) {
-    const container = document.getElementById('family-urgent-alerts');
-    if (!container) return;
+            const details = document.createElement('div');
+            details.className = 'caregiver-planner-task';
+            const title = document.createElement('span');
+            title.textContent = task.title;
+            details.append(title);
+            if (task.dueDate) {
+                const dueDate = document.createElement('time');
+                dueDate.dateTime = task.dueDate;
+                dueDate.textContent = `Due ${formatDueDate(task.dueDate)}`;
+                details.append(dueDate);
+            }
 
-    const latestAlerts = alerts
-        .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
-        .slice(0, 5);
-    const signature = latestAlerts.map((alert) => `${alert.id}:${alert.read ? 1 : 0}`).join('|');
-    if (signature === familyHospitalAlertSignature) return;
-    familyHospitalAlertSignature = signature;
-    container.replaceChildren();
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'btn btn-secondary';
+            remove.textContent = 'Remove';
+            remove.setAttribute('aria-label', `Remove task: ${task.title}`);
+            remove.addEventListener('click', () => {
+                tasks = tasks.filter((entry) => entry.id !== task.id);
+                saveTasks();
+                renderTasks();
+            });
+            item.append(checkbox, details, remove);
+            taskList.append(item);
+        });
+        clearButton.disabled = tasks.length === 0;
+    };
 
-    latestAlerts.forEach((alert) => {
-        const item = document.createElement('article');
-        item.className = 'family-hospital-alert';
-        item.setAttribute('role', 'alert');
-
-        const title = document.createElement('h2');
-        title.textContent = alert.title || 'Urgent: please come to the hospital';
-        const content = document.createElement('p');
-        content.textContent = alert.content || 'The doctor has requested that family come to the hospital now.';
-        const timestamp = document.createElement('time');
-        timestamp.dateTime = alert.timestamp || '';
-        timestamp.textContent = alert.timestamp ? new Date(alert.timestamp).toLocaleString() : '';
-
-        item.append(title, content, timestamp);
-        container.append(item);
+    plannerForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const title = taskInput.value.trim();
+        if (!title) {
+            status.textContent = 'Enter a task before adding it.';
+            taskInput.focus();
+            return;
+        }
+        tasks.push({
+            id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            title,
+            dueDate: dateInput.value,
+            done: false
+        });
+        if (saveTasks()) {
+            plannerForm.reset();
+            renderTasks();
+        }
     });
+
+    clearButton.addEventListener('click', () => {
+        if (!tasks.length || !window.confirm('Clear all tasks saved in this browser?')) return;
+        tasks = [];
+        if (saveTasks()) renderTasks();
+    });
+
+    renderTasks();
+    status.textContent = tasks.length
+        ? 'Tasks loaded from this browser only.'
+        : 'Tasks are stored in this browser only and are not synced.';
 }
 
 function buildPatientHeartRateHistory(patient) {
