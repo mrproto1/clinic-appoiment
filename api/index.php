@@ -78,7 +78,7 @@ if (($segments[0] ?? '') === 'chat') {
 
 initialize_data_store();
 
-$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'operations', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests', 'death-certificates', 'medicine-stock', 'notifications', 'audit-logs', 'medical-documents', 'wards'];
+$allowedResources = ['auth', 'patients', 'users', 'messages', 'appointments', 'operations', 'organ-donors', 'leaves', 'bulletins', 'site-status', 'clinical-requests', 'death-certificates', 'medicine-stock', 'notifications', 'audit-logs', 'medical-documents', 'daily-check-ins', 'family-reminders', 'wards'];
 while (!empty($segments) && !in_array($segments[0], $allowedResources, true)) {
     array_shift($segments);
 }
@@ -94,6 +94,12 @@ switch ($resource) {
         break;
     case 'patients':
         handle_patient_routes($requestMethod, $segments, $body);
+        break;
+    case 'daily-check-ins':
+        handle_daily_check_in_routes($requestMethod, $segments, $body);
+        break;
+    case 'family-reminders':
+        handle_family_reminder_routes($requestMethod, $segments, $body);
         break;
     case 'users':
         handle_user_routes($requestMethod, $segments, $body);
@@ -205,8 +211,18 @@ function handle_faq_chat($method, $segments, $body)
         respond(400, ['error' => 'Enter a message under 1,200 characters.']);
     }
 
-    if (!empty($body['familyMode']) || !empty($body['includePatientVitals'])) {
-        respond(403, ['error' => 'Family support chat no longer accesses patient records.']);
+    if (!empty($body['includePatientVitals'])) {
+        respond(403, ['error' => 'Patient readings are not available in Family Access.']);
+    }
+
+    $familyMode = !empty($body['familyMode']);
+
+    if ($familyMode) {
+        if (empty($body['familyConsent'])) {
+            respond(403, ['error' => 'Consent is required before using family support chat.']);
+        }
+
+        require_auth(['family']);
     }
 
     $forwardedAddresses = explode(',', (string)($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''));
@@ -245,7 +261,7 @@ function handle_faq_chat($method, $segments, $body)
 
     $requestPayload = [
         'model' => 'gpt-4o-mini',
-        'instructions' => 'You are The Protocol Cardiology website FAQ assistant. Answer briefly and empathetically in the language the visitor uses. Help with website navigation, appointments, specialists, Family Access, organ donor tributes, and general non-clinical support. Never diagnose, interpret symptoms, recommend treatment, or interpret heart-rate/ECG readings. For urgent symptoms or immediate danger, direct visitors to local emergency services or immediate medical care. Do not invent clinic hours, contact details, prices, or medical facts. If information is unavailable, direct visitors to the Contact Us page or clinic staff. Do not ask for or expose names, emails, patient IDs, diagnosis, account details, or other identifying information.',
+        'instructions' => 'You are The Protocol Cardiology website FAQ and family support assistant. Answer briefly and empathetically in the language the visitor uses. Help with website navigation, appointments, specialists, Family Access, organ donor tributes, and general non-clinical support for worried family members. Never provide or interpret patient readings, call a patient stable/unstable, diagnose, interpret symptoms, or recommend treatment. Encourage families to contact the patient\'s care team for individual guidance. For urgent symptoms or immediate danger, direct them to local emergency services or immediate medical care. Do not invent clinic hours, contact details, prices, or medical facts. If information is unavailable, direct visitors to the Contact Us page or clinic staff. Do not ask for or expose names, emails, patient IDs, diagnosis, account details, or other identifying information.',
         'input' => $message,
         'max_output_tokens' => 220,
         'store' => false
@@ -361,10 +377,6 @@ function require_auth($allowedRoles = [])
         respond(401, ['error' => 'User no longer exists']);
     }
 
-    if (($user['role'] ?? '') === 'family') {
-        respond(403, ['error' => 'Family accounts can only use the private caregiver planner.']);
-    }
-
     if (!empty($allowedRoles) && !in_array((string)$user['role'], $allowedRoles, true)) {
         respond(403, ['error' => 'Forbidden']);
     }
@@ -425,6 +437,8 @@ function get_collection_table($name)
         'notifications' => 'collection_notifications',
         'audit_logs' => 'collection_audit_logs',
         'medical_documents' => 'collection_medical_documents',
+        'daily_check_ins' => 'collection_daily_check_ins',
+        'family_reminders' => 'collection_family_reminders',
         'ward_beds' => 'collection_ward_beds',
         'donor_codes' => 'collection_donor_codes'
     ];
@@ -695,9 +709,11 @@ function notify_patient_contacts($patient, $type, $title, $message, $metadata = 
     $recipients = [];
     foreach (read_data('users') as $candidate) {
         $role = (string)($candidate['role'] ?? '');
-        if ($role !== 'patient') continue;
+        if (!in_array($role, ['patient', 'family'], true)) continue;
 
-        $matchesPatient = $patientEmail !== '' && strtolower(trim((string)($candidate['email'] ?? ''))) === $patientEmail;
+        $linked = $role === 'family' ? find_patient_for_user($candidate) : null;
+        $matchesPatient = ($linked && (int)($linked['id'] ?? 0) === $patientId)
+            || ($role === 'patient' && $patientEmail !== '' && strtolower(trim((string)($candidate['email'] ?? ''))) === $patientEmail);
         if ($matchesPatient) $recipients[(int)$candidate['id']] = true;
     }
 
@@ -717,10 +733,10 @@ function sanitize_user($user)
         'phone' => $user['phone'] ?? null,
         'department' => $user['department'] ?? null,
         'appointmentRequestsEnabled' => ($user['role'] ?? '') === 'doctor' ? doctor_accepts_appointment_requests($user) : null,
-        'linkedPatientId' => ($user['role'] ?? '') === 'family' ? null : (isset($user['linkedPatientId']) ? (int)$user['linkedPatientId'] : null),
-        'linkedPatientEmail' => ($user['role'] ?? '') === 'family' ? null : ($user['linkedPatientEmail'] ?? null),
-        'linkedPatientName' => ($user['role'] ?? '') === 'family' ? null : ($user['linkedPatientName'] ?? null),
-        'relationship' => ($user['role'] ?? '') === 'family' ? null : ($user['relationship'] ?? null)
+        'linkedPatientId' => isset($user['linkedPatientId']) ? (int)$user['linkedPatientId'] : null,
+        'linkedPatientEmail' => $user['linkedPatientEmail'] ?? null,
+        'linkedPatientName' => $user['linkedPatientName'] ?? null,
+        'relationship' => $user['relationship'] ?? null
     ];
 }
 
@@ -766,6 +782,29 @@ function find_patient_for_user($user)
             if ($patientName !== '' && $patientName === $linkedName) {
                 return $patient;
             }
+        }
+    }
+
+    return null;
+}
+
+function find_patient_record_for_user($user)
+{
+    $patient = find_patient_for_user($user);
+    if ($patient || ($user['role'] ?? '') !== 'patient') {
+        return $patient;
+    }
+
+    $emailKey = strtolower(trim((string)($user['email'] ?? '')));
+    $nameKey = normalize_person_name((string)($user['name'] ?? ''));
+    foreach (read_data('patients') as $candidate) {
+        if ($emailKey !== '' && strtolower(trim((string)($candidate['email'] ?? ''))) === $emailKey) {
+            return $candidate;
+        }
+    }
+    foreach (read_data('patients') as $candidate) {
+        if ($nameKey !== '' && normalize_person_name((string)($candidate['name'] ?? '')) === $nameKey) {
+            return $candidate;
         }
     }
 
@@ -821,15 +860,6 @@ function handle_auth_routes($method, $segments, $body)
                 || (normalize_login_key($storedName) === $usernameKey);
 
             if ($identifierMatched && verify_user_password($user, $password)) {
-                if (($user['role'] ?? '') === 'family'
-                    && (!empty($user['linkedPatientId']) || !empty($user['linkedPatientEmail']) || !empty($user['linkedPatientName']) || !empty($user['relationship']))) {
-                    $user = update_row('users', (int)$user['id'], [
-                        'linkedPatientId' => null,
-                        'linkedPatientEmail' => null,
-                        'linkedPatientName' => null,
-                        'relationship' => null
-                    ]);
-                }
                 $token = create_token($user);
                 respond(200, ['token' => $token, 'user' => sanitize_user($user)]);
             }
@@ -891,7 +921,7 @@ function handle_auth_routes($method, $segments, $body)
         $linkedPatientName = null;
         $matchedPatient = null;
 
-        if ($role === 'patient' && $email !== '') {
+        if ($email !== '') {
             $patients = read_data('patients');
             foreach ($patients as $patient) {
                 if (strtolower(trim((string)($patient['email'] ?? ''))) === strtolower($email)) {
@@ -899,6 +929,44 @@ function handle_auth_routes($method, $segments, $body)
                     break;
                 }
             }
+        }
+
+        if ($role === 'family') {
+            $matchedPatient = null;
+            $linkedPatientEmail = trim((string)($body['patientEmail'] ?? $body['linkedPatientEmail'] ?? ''));
+            $linkedPatientName = trim((string)($body['patientName'] ?? $body['linkedPatientName'] ?? ''));
+
+            if ($linkedPatientEmail === '' && $linkedPatientName === '') {
+                respond(400, ['error' => 'Family account must include the patient email or name']);
+            }
+
+            if ($linkedPatientEmail !== '') {
+                $patients = read_data('patients');
+                foreach ($patients as $patient) {
+                    if (strtolower(trim((string)($patient['email'] ?? ''))) === strtolower($linkedPatientEmail)) {
+                        $matchedPatient = $patient;
+                        break;
+                    }
+                }
+            }
+
+            if (!$matchedPatient && $linkedPatientName !== '') {
+                $patients = read_data('patients');
+                foreach ($patients as $patient) {
+                    if (normalize_person_name((string)($patient['name'] ?? '')) === normalize_person_name($linkedPatientName)) {
+                        $matchedPatient = $patient;
+                        break;
+                    }
+                }
+            }
+
+            if (!$matchedPatient) {
+                respond(400, ['error' => 'No matching patient record was found for this family access request. Please use the patient email or name registered in the system.']);
+            }
+
+            $linkedPatientId = isset($matchedPatient['id']) ? (int)$matchedPatient['id'] : null;
+            $linkedPatientEmail = $matchedPatient['email'] ?? $linkedPatientEmail;
+            $linkedPatientName = $matchedPatient['name'] ?? $linkedPatientName;
         }
 
         if ($role === 'patient' && $matchedPatient) {
@@ -918,7 +986,7 @@ function handle_auth_routes($method, $segments, $body)
             'linkedPatientId' => $linkedPatientId,
             'linkedPatientEmail' => $linkedPatientEmail,
             'linkedPatientName' => $linkedPatientName,
-            'relationship' => $role === 'family' ? null : (trim((string)($body['relationship'] ?? '')) ?: null)
+            'relationship' => trim((string)($body['relationship'] ?? '')) ?: null
         ]);
 
         respond(201, ['message' => 'User registered successfully', 'user' => sanitize_user($newUser)]);
@@ -953,7 +1021,13 @@ function handle_patient_routes($method, $segments, $body)
     }
 
     if ($method === 'GET' && count($segments) === 3 && $segments[1] === 'doctor') {
+        if (!in_array($user['role'] ?? '', ['doctor', 'staff', 'admin'], true)) {
+            respond(403, ['error' => 'Insufficient permissions']);
+        }
         $doctorId = (int)$segments[2];
+        if (($user['role'] ?? '') === 'doctor' && !in_array($doctorId, get_doctor_alias_ids((int)$user['id']), true)) {
+            respond(403, ['error' => 'You can only view patients assigned to you']);
+        }
         $patients = array_values(array_filter(read_data('patients'), function ($patient) use ($doctorId) {
             return (int)($patient['assignedDoctor'] ?? 0) === $doctorId
                 && ($patient['status'] ?? 'active') !== 'discharged';
@@ -1128,33 +1202,14 @@ function handle_patient_routes($method, $segments, $body)
             respond(403, ['error' => 'Insufficient permissions']);
         }
 
-        $matched = find_patient_for_user($user);
-        if (!$matched && ($user['role'] ?? '') === 'patient') {
-            $patients = read_data('patients');
-            $emailKey = strtolower(trim((string)($user['email'] ?? '')));
-            $nameKey = normalize_person_name((string)($user['name'] ?? ''));
-
-            foreach ($patients as $patient) {
-                $patientEmail = strtolower(trim((string)($patient['email'] ?? '')));
-                if ($emailKey !== '' && $patientEmail === $emailKey) {
-                    $matched = $patient;
-                    break;
-                }
-            }
-
-            if (!$matched) {
-                foreach ($patients as $patient) {
-                    $patientNameKey = normalize_person_name((string)($patient['name'] ?? ''));
-                    if ($nameKey !== '' && $patientNameKey === $nameKey) {
-                        $matched = $patient;
-                        break;
-                    }
-                }
-            }
-        }
+        $matched = find_patient_record_for_user($user);
 
         if (!$matched) {
             respond(404, ['error' => 'Patient profile not found']);
+        }
+
+        if (($user['role'] ?? '') === 'family') {
+            unset($matched['vitals']);
         }
 
         respond(200, $matched);
@@ -1289,6 +1344,13 @@ function handle_patient_routes($method, $segments, $body)
         $patient = find_by_id('patients', (int)$segments[1]);
         if (!$patient) {
             respond(404, ['error' => 'Patient not found']);
+        }
+
+        if (!user_can_access_patient($user, $patient)) {
+            respond(403, ['error' => 'You cannot access this patient record']);
+        }
+        if (($user['role'] ?? '') === 'family') {
+            unset($patient['vitals']);
         }
 
         respond(200, $patient);
@@ -1447,6 +1509,180 @@ function send_bird_email($recipientEmail, $subject, $text, $idempotencyKey)
     }
 
     return ['accepted' => false, 'error' => $errorSummary];
+}
+
+function handle_daily_check_in_routes($method, $segments, $body)
+{
+    $user = require_auth(['admin', 'staff', 'doctor', 'family']);
+    ensure_collection_table('daily_check_ins');
+
+    if ($method === 'GET' && count($segments) === 1) {
+        $records = read_data('daily_check_ins');
+        if (($user['role'] ?? '') === 'family') {
+            $patient = find_patient_for_user($user);
+            if (!$patient) {
+                respond(404, ['error' => 'No linked patient record was found for this family account']);
+            }
+            $patientId = (int)$patient['id'];
+            $familyUserId = (int)$user['id'];
+            $records = array_values(array_filter($records, function ($record) use ($patientId, $familyUserId) {
+                return (int)($record['patientId'] ?? 0) === $patientId
+                    && (int)($record['familyUserId'] ?? 0) === $familyUserId;
+            }));
+        } else {
+            $records = array_values(array_filter($records, function ($record) use ($user) {
+                $patient = find_by_id('patients', (int)($record['patientId'] ?? 0));
+                return $patient && user_can_access_patient($user, $patient);
+            }));
+        }
+
+        usort($records, function ($a, $b) {
+            return strtotime($b['updatedAt'] ?? $b['createdAt'] ?? '') <=> strtotime($a['updatedAt'] ?? $a['createdAt'] ?? '');
+        });
+        respond(200, array_slice($records, 0, 100));
+    }
+
+    if ($method === 'POST' && count($segments) === 1) {
+        if (($user['role'] ?? '') !== 'family') {
+            respond(403, ['error' => 'Only family members can submit a daily check-in']);
+        }
+
+        $patient = find_patient_for_user($user);
+        if (!$patient) {
+            respond(404, ['error' => 'No linked patient record was found for this family account']);
+        }
+
+        $patientFeeling = trim((string)($body['patientFeeling'] ?? ''));
+        $familyFeeling = trim((string)($body['familyFeeling'] ?? ''));
+        if (!in_array($patientFeeling, ['good', 'okay', 'not_well', 'need_support'], true)) {
+            respond(400, ['error' => 'Choose how your family member seems to be feeling today']);
+        }
+        if (!in_array($familyFeeling, ['okay', 'worried', 'need_support'], true)) {
+            respond(400, ['error' => 'Choose how you are feeling today']);
+        }
+        $note = clinical_text($body['note'] ?? '', 300);
+        if ($note === null) {
+            respond(400, ['error' => 'The note must be no longer than 300 characters']);
+        }
+
+        $patientId = (int)$patient['id'];
+        $familyUserId = (int)$user['id'];
+        $checkInDate = (new DateTimeImmutable('now', new DateTimeZone('Asia/Kuala_Lumpur')))->format('Y-m-d');
+        $existing = null;
+        foreach (read_data('daily_check_ins') as $record) {
+            if ((int)($record['patientId'] ?? 0) === $patientId
+                && (int)($record['familyUserId'] ?? 0) === $familyUserId
+                && ($record['checkInDate'] ?? '') === $checkInDate) {
+                $existing = $record;
+                break;
+            }
+        }
+
+        $data = [
+            'patientId' => $patientId,
+            'patientName' => (string)($patient['name'] ?? ''),
+            'familyUserId' => $familyUserId,
+            'familyMemberName' => (string)($user['name'] ?? ''),
+            'patientFeeling' => $patientFeeling,
+            'familyFeeling' => $familyFeeling,
+            'note' => $note,
+            'checkInDate' => $checkInDate,
+            'updatedAt' => gmdate('c')
+        ];
+        $checkIn = $existing
+            ? update_row('daily_check_ins', (int)$existing['id'], $data)
+            : add_row('daily_check_ins', $data);
+
+        $recipients = [];
+        foreach (['assignedDoctor', 'assignedStaff'] as $assignment) {
+            $recipient = find_by_id('users', (int)($patient[$assignment] ?? 0));
+            if ($recipient && in_array(($recipient['role'] ?? ''), ['doctor', 'staff'], true)) {
+                $recipients[(int)$recipient['id']] = true;
+            }
+        }
+        foreach (array_keys($recipients) as $recipientId) {
+            create_user_notification(
+                $recipientId,
+                'family-daily-check-in',
+                'Family daily check-in',
+                'A family member submitted a daily check-in. Review it in your dashboard.',
+                ['patientId' => $patientId, 'checkInId' => (int)$checkIn['id']]
+            );
+        }
+        audit_event($user, 'family-daily-check-in-submitted', 'daily-check-in', $checkIn['id'], ['patientId' => $patientId]);
+
+        respond($existing ? 200 : 201, ['message' => 'Daily check-in shared with your care team', 'checkIn' => $checkIn]);
+    }
+
+    respond(404, ['error' => 'Route not found']);
+}
+
+function handle_family_reminder_routes($method, $segments, $body)
+{
+    $user = require_auth(['family']);
+    ensure_collection_table('family_reminders');
+    $familyUserId = (int)$user['id'];
+
+    if ($method === 'GET' && count($segments) === 1) {
+        $reminders = array_values(array_filter(read_data('family_reminders'), function ($reminder) use ($familyUserId) {
+            return (int)($reminder['familyUserId'] ?? 0) === $familyUserId;
+        }));
+        usort($reminders, function ($a, $b) {
+            if ((bool)($a['completed'] ?? false) !== (bool)($b['completed'] ?? false)) {
+                return (bool)($a['completed'] ?? false) ? 1 : -1;
+            }
+            return strcmp(
+                (string)($a['date'] ?? '') . ' ' . (string)($a['time'] ?? ''),
+                (string)($b['date'] ?? '') . ' ' . (string)($b['time'] ?? '')
+            );
+        });
+        respond(200, array_slice($reminders, 0, 100));
+    }
+
+    if ($method === 'POST' && count($segments) === 1) {
+        $title = clinical_text($body['title'] ?? '', 120, true);
+        $note = clinical_text($body['note'] ?? '', 240);
+        $date = trim((string)($body['date'] ?? ''));
+        $time = trim((string)($body['time'] ?? ''));
+        $today = (new DateTimeImmutable('now', new DateTimeZone('Asia/Kuala_Lumpur')))->format('Y-m-d');
+
+        if ($title === null || $note === null || !valid_iso_date($date) || $date < $today
+            || !preg_match('/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/', $time)) {
+            respond(400, ['error' => 'Enter a reminder and a valid time today or in the future']);
+        }
+
+        $reminder = add_row('family_reminders', [
+            'familyUserId' => $familyUserId,
+            'title' => $title,
+            'note' => $note,
+            'date' => $date,
+            'time' => $time,
+            'completed' => false
+        ]);
+        respond(201, ['message' => 'Reminder added', 'reminder' => $reminder]);
+    }
+
+    if (count($segments) === 2 && is_numeric($segments[1])) {
+        $reminder = find_by_id('family_reminders', (int)$segments[1]);
+        if (!$reminder || (int)($reminder['familyUserId'] ?? 0) !== $familyUserId) {
+            respond(404, ['error' => 'Reminder not found']);
+        }
+
+        if ($method === 'PUT') {
+            if (!is_bool($body['completed'] ?? null)) {
+                respond(400, ['error' => 'Reminder completion must be true or false']);
+            }
+            $updated = update_row('family_reminders', (int)$reminder['id'], ['completed' => $body['completed']]);
+            respond(200, ['message' => 'Reminder updated', 'reminder' => $updated]);
+        }
+
+        if ($method === 'DELETE') {
+            delete_row('family_reminders', (int)$reminder['id']);
+            respond(200, ['message' => 'Reminder deleted']);
+        }
+    }
+
+    respond(404, ['error' => 'Route not found']);
 }
 
 function handle_user_routes($method, $segments, $body)
@@ -1785,7 +2021,7 @@ function handle_operation_routes($method, $segments, $body)
 function handle_appointment_routes($method, $segments, $body)
 {
     if ($method === 'GET' && count($segments) === 2 && $segments[1] === 'me') {
-        $user = require_auth(['patient', 'doctor', 'staff', 'admin']);
+        $user = require_auth(['patient', 'family', 'doctor', 'staff', 'admin']);
         $items = array_values(array_filter(read_data('appointments'), function ($appointment) use ($user) {
             return appointment_belongs_to_user($appointment, $user);
         }));
@@ -2018,7 +2254,7 @@ function handle_appointment_routes($method, $segments, $body)
     }
 
     if ($method === 'PUT' && count($segments) === 2 && is_numeric($segments[1])) {
-        $user = require_auth(['patient', 'doctor', 'staff', 'admin']);
+        $user = require_auth(['patient', 'family', 'doctor', 'staff', 'admin']);
         $appointmentId = (int)$segments[1];
         $appointment = find_by_id('appointments', $appointmentId);
         if (!$appointment) respond(404, ['error' => 'Appointment not found']);
@@ -2375,7 +2611,7 @@ function handle_organ_donor_routes($method, $segments, $body)
     if ($method === 'GET' && count($segments) === 1) {
         $donors = read_data('organ_donors');
         usort($donors, function ($a, $b) {
-            return strtotime($b['createdAt'] ?? '') <=> strtotime($a['createdAt'] ?? '');
+            return strtotime($b['updatedAt'] ?? $b['createdAt'] ?? '') <=> strtotime($a['updatedAt'] ?? $a['createdAt'] ?? '');
         });
 
         respond(200, array_map(function ($donor) {
@@ -2556,7 +2792,7 @@ function public_clinical_request($item)
 
 function handle_clinical_request_routes($method, $segments, $body)
 {
-    $user = require_auth(['doctor', 'staff', 'admin']);
+    $user = require_auth(['doctor', 'staff', 'admin', 'family']);
     $role = (string)$user['role'];
 
     if ($method === 'GET' && count($segments) === 1) {
@@ -2910,7 +3146,7 @@ function public_death_certificate($record)
 
 function handle_death_certificate_routes($method, $segments, $body)
 {
-    $user = require_auth(['doctor', 'admin']);
+    $user = require_auth(['doctor', 'admin', 'family']);
     $role = (string)$user['role'];
 
     if ($method === 'GET' && count($segments) === 1) {
@@ -3227,117 +3463,6 @@ function normalize_medicine_name($value)
     return strtolower(preg_replace('/\s+/', ' ', trim((string)$value)));
 }
 
-function ensure_starter_medicine_catalog()
-{
-    $db = get_db();
-    $lockName = 'clinic_starter_medicine_catalog_v1';
-    $markerQuery = "SELECT `value` FROM `app_metadata` WHERE `key` = 'starter_medicine_catalog_v1' LIMIT 1";
-    $markerResult = $db->query($markerQuery);
-    if (!$markerResult) {
-        respond(500, ['error' => 'Unable to check starter medicine catalog status']);
-    }
-    $markerRow = $markerResult->fetch_assoc();
-    if (($markerRow['value'] ?? '') === '1') {
-        return;
-    }
-
-    $lockResult = $db->query("SELECT GET_LOCK('{$lockName}', 15) AS acquired");
-    $lockRow = $lockResult ? $lockResult->fetch_assoc() : null;
-    if ((int)($lockRow['acquired'] ?? 0) !== 1) {
-        respond(503, ['error' => 'Medicine catalog setup is busy; retry the request']);
-    }
-
-    try {
-        $markerResult = $db->query($markerQuery);
-        if (!$markerResult) {
-            respond(500, ['error' => 'Unable to check starter medicine catalog status']);
-        }
-        $markerRow = $markerResult->fetch_assoc();
-        if (($markerRow['value'] ?? '') === '1') {
-            return;
-        }
-
-        $starterMedicines = [
-            ['Adenosine', 'vial'],
-            ['Amiodarone', 'tablet'],
-            ['Amlodipine', 'tablet'],
-            ['Apixaban', 'tablet'],
-            ['Aspirin', 'tablet'],
-            ['Atenolol', 'tablet'],
-            ['Atorvastatin', 'tablet'],
-            ['Atropine', 'ampoule'],
-            ['Bisoprolol', 'tablet'],
-            ['Bumetanide', 'tablet'],
-            ['Captopril', 'tablet'],
-            ['Carvedilol', 'tablet'],
-            ['Clopidogrel', 'tablet'],
-            ['Clonidine', 'tablet'],
-            ['Dabigatran', 'capsule'],
-            ['Dapagliflozin', 'tablet'],
-            ['Digoxin', 'tablet'],
-            ['Diltiazem', 'tablet'],
-            ['Doxazosin', 'tablet'],
-            ['Empagliflozin', 'tablet'],
-            ['Enalapril', 'tablet'],
-            ['Enoxaparin', 'syringe'],
-            ['Eplerenone', 'tablet'],
-            ['Furosemide', 'tablet'],
-            ['Glyceryl trinitrate', 'spray'],
-            ['Heparin', 'vial'],
-            ['Hydralazine', 'tablet'],
-            ['Hydrochlorothiazide', 'tablet'],
-            ['Indapamide', 'tablet'],
-            ['Isosorbide dinitrate', 'tablet'],
-            ['Isosorbide mononitrate', 'tablet'],
-            ['Ivabradine', 'tablet'],
-            ['Labetalol', 'tablet'],
-            ['Losartan', 'tablet'],
-            ['Magnesium sulfate', 'ampoule'],
-            ['Methyldopa', 'tablet'],
-            ['Metoprolol', 'tablet'],
-            ['Nifedipine', 'tablet'],
-            ['Perindopril', 'tablet'],
-            ['Potassium chloride', 'tablet'],
-            ['Propranolol', 'tablet'],
-            ['Rivaroxaban', 'tablet'],
-            ['Rosuvastatin', 'tablet'],
-            ['Sacubitril/valsartan', 'tablet'],
-            ['Simvastatin', 'tablet'],
-            ['Spironolactone', 'tablet'],
-            ['Ticagrelor', 'tablet'],
-            ['Valsartan', 'tablet'],
-            ['Verapamil', 'tablet'],
-            ['Warfarin', 'tablet']
-        ];
-        $existingNames = [];
-        foreach (read_data('medicine_stock') as $item) {
-            $existingNames[normalize_medicine_name($item['name'] ?? '')] = true;
-        }
-
-        foreach ($starterMedicines as [$name, $unit]) {
-            $nameKey = normalize_medicine_name($name);
-            if (isset($existingNames[$nameKey])) {
-                continue;
-            }
-
-            add_row('medicine_stock', [
-                'name' => $name,
-                'unit' => $unit,
-                'quantity' => 0,
-                'minimum' => 0,
-                'updatedBy' => 0
-            ]);
-            $existingNames[$nameKey] = true;
-        }
-
-        if (!$db->query("INSERT INTO `app_metadata` (`key`, `value`) VALUES ('starter_medicine_catalog_v1', '1') ON DUPLICATE KEY UPDATE `value` = '1'")) {
-            respond(500, ['error' => 'Unable to finish starter medicine catalog setup']);
-        }
-    } finally {
-        $db->query("SELECT RELEASE_LOCK('{$lockName}')");
-    }
-}
-
 function find_medicine_stock($name)
 {
     $key = normalize_medicine_name($name);
@@ -3351,7 +3476,6 @@ function handle_medicine_stock_routes($method, $segments, $body)
 {
     $user = require_auth(['admin', 'staff', 'doctor', 'pharmacy']);
     if ($method === 'GET' && count($segments) === 1) {
-        ensure_starter_medicine_catalog();
         $items = read_data('medicine_stock');
         usort($items, function ($a, $b) { return strcasecmp((string)($a['name'] ?? ''), (string)($b['name'] ?? '')); });
         respond(200, $items);
@@ -3438,7 +3562,7 @@ function find_patient_by_email($email)
 
 function handle_notification_routes($method, $segments, $body)
 {
-    $user = require_auth(['admin', 'staff', 'doctor', 'patient', 'pharmacy']);
+    $user = require_auth(['admin', 'staff', 'doctor', 'patient', 'family', 'pharmacy']);
 
     if ($method === 'GET' && count($segments) === 1) {
         $appointments = read_data('appointments');
@@ -3513,7 +3637,7 @@ function medical_document_summary($document)
 
 function handle_medical_document_routes($method, $segments, $body)
 {
-    $user = require_auth(['admin', 'staff', 'doctor', 'patient']);
+    $user = require_auth(['admin', 'staff', 'doctor', 'family', 'patient']);
     if ($method === 'GET' && count($segments) === 1) {
         $patientId = isset($_GET['patientId']) ? (int)$_GET['patientId'] : 0;
         $records = read_data('medical_documents');
