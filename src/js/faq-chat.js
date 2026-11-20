@@ -10,7 +10,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const familyMode = widget.dataset.familyOnly === 'true';
     const familyConsent = document.getElementById('faq-chat-family-consent');
-    const shareVitals = document.getElementById('faq-chat-share-vitals');
     const consentError = document.getElementById('faq-chat-consent-error');
     if (familyMode) {
         let currentUser = {};
@@ -72,8 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     message: trimmedQuestion,
                     familyMode,
-                    familyConsent: familyMode ? Boolean(familyConsent?.checked) : false,
-                    includePatientVitals: familyMode && Boolean(shareVitals?.checked)
+                    familyConsent: familyMode ? Boolean(familyConsent?.checked) : false
                 })
             });
             const result = await response.json().catch(() => ({}));

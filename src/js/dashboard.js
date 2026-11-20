@@ -20,7 +20,7 @@ let patientVitalsAlertSignature = '';
 let doctorVitalsHistoryByPatient = {};
 let medicineStockCache = [];
 let doctorEcgStateByPatient = {};
-const familyDemoVitalsByPatient = new Map();
+let familyHospitalAlertSignature = '';
 const MAX_RECONNECT_ATTEMPTS = 5;
 const CODE_BLUE_POLL_MS = 5000;
 const RATE_LIMIT_BACKOFF_MS = 60000;
@@ -74,7 +74,7 @@ const DASHBOARD_API_BASE = resolveApiBase();
 
 // Initialize WebSocket for real-time updates
 function initWebSocket() {
-    if (!isLoggedIn() || currentUser.role === 'family') return;
+    if (!isLoggedIn()) return;
 
     if (realtimePollTimer) {
         clearInterval(realtimePollTimer);
@@ -130,8 +130,45 @@ function getCodeBlueSeenKey() {
     return `codeBlueSeenAt:${currentUser.id || 'guest'}`;
 }
 
+function getFamilyLinkedPatientContext() {
+    if (!currentUser || currentUser.role !== 'family') {
+        return null;
+    }
+
+    return {
+        patientId: Number(currentUser.linkedPatientId || 0),
+        patientName: String(currentUser.linkedPatientName || '').trim().toLowerCase(),
+        patientEmail: String(currentUser.linkedPatientEmail || '').trim().toLowerCase()
+    };
+}
+
+function messageMatchesLinkedPatient(message, familyContext) {
+    if (!message || !familyContext) {
+        return true;
+    }
+
+    const metadata = message.metadata || {};
+    const patientId = Number(metadata.patientId || 0);
+    const patientName = String(metadata.patientName || '').trim().toLowerCase();
+    const patientEmail = String(metadata.patientEmail || '').trim().toLowerCase();
+
+    if (familyContext.patientId > 0 && patientId > 0 && familyContext.patientId === patientId) {
+        return true;
+    }
+
+    if (familyContext.patientName && patientName && familyContext.patientName === patientName) {
+        return true;
+    }
+
+    if (familyContext.patientEmail && patientEmail && familyContext.patientEmail === patientEmail) {
+        return true;
+    }
+
+    return false;
+}
+
 async function pollCodeBlueAlerts() {
-    if (!isLoggedIn() || currentUser.role === 'family') return;
+    if (!isLoggedIn()) return;
 
     try {
         const response = await apiCall('/messages/group/all');
@@ -141,7 +178,12 @@ async function pollCodeBlueAlerts() {
         const messages = await response.json();
         if (!Array.isArray(messages) || !messages.length) return;
 
-        const latestCodeBlue = [...messages.filter((item) => item && item.type === 'code-blue')]
+        const familyContext = getFamilyLinkedPatientContext();
+        const relevantMessages = familyContext
+            ? messages.filter((item) => item && item.type === 'code-blue' && messageMatchesLinkedPatient(item, familyContext))
+            : messages.filter((item) => item && item.type === 'code-blue');
+
+        const latestCodeBlue = [...relevantMessages]
             .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))[0];
 
         if (!latestCodeBlue) return;
@@ -184,6 +226,16 @@ function handleWebSocketMessage(data) {
             break;
         case 'code-blue': {
             const alert = data.alert || {};
+            const familyContext = getFamilyLinkedPatientContext();
+            if (familyContext && !messageMatchesLinkedPatient({
+                metadata: alert.metadata || {
+                    patientId: alert.patientId,
+                    patientName: alert.patientName,
+                    patientEmail: alert.patientEmail
+                }
+            }, familyContext)) {
+                break;
+            }
             showNotification(`🚨 CODE BLUE: ${data.alert.message}`, 'danger');
             showCodeBlueOverlay(alert.message || 'Immediate assistance is required.');
             break;
@@ -253,7 +305,7 @@ function showNotification(message, type = 'info') {
 }
 
 async function loadUserNotifications() {
-    if (!isLoggedIn() || currentUser.role === 'family' || document.hidden) return;
+    if (!isLoggedIn() || document.hidden) return;
     try {
         const response = await apiCall('/notifications');
         if (!response || !response.ok) return;
@@ -393,19 +445,7 @@ async function triggerFamilyCodeBlueContact(patient, roomNumber, note) {
 async function initializeDashboard() {
     if (!requireAuth()) return;
 
-    const role = currentUser.role;
-    if (role === 'family') {
-        delete currentUser.linkedPatient;
-        delete currentUser.linkedPatientId;
-        delete currentUser.linkedPatientEmail;
-        delete currentUser.linkedPatientName;
-        delete currentUser.relationship;
-        try {
-            localStorage.setItem('currentUser', JSON.stringify(currentUser));
-        } catch (error) {
-            console.error('Unable to clear old family patient-link data from this browser:', error);
-        }
-    }
+    const role = new URLSearchParams(window.location.search).get('role') || currentUser.role;
 
     if (typeof window.showRoleMenu === 'function') {
         window.showRoleMenu(role);
@@ -419,20 +459,19 @@ async function initializeDashboard() {
     updateDashboardHero(currentUser.name, currentUser.role);
     showRoleBasedSections(role);
 
-    if (role !== 'family') {
-        initWebSocket();
-        pollCodeBlueAlerts();
-        loadUserNotifications();
-        if (notificationPollTimer) clearInterval(notificationPollTimer);
-        notificationPollTimer = setInterval(loadUserNotifications, 30000);
+    // Initialize WebSocket for real-time updates
+    initWebSocket();
+    pollCodeBlueAlerts();
+    loadUserNotifications();
+    if (notificationPollTimer) clearInterval(notificationPollTimer);
+    notificationPollTimer = setInterval(loadUserNotifications, 30000);
 
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                pollCodeBlueAlerts();
-                loadUserNotifications();
-            }
-        });
-    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            pollCodeBlueAlerts();
+            loadUserNotifications();
+        }
+    });
 
     if (role === 'doctor') {
         loadDoctorDirectory().then(() => loadDoctorDashboard());
@@ -466,7 +505,7 @@ function showDashboardRoleMenu(role) {
         pharmacy: ['pharmacy-menu'],
         admin: ['admin-menu', 'admin-menu-2', 'admin-menu-3', 'admin-menu-4', 'admin-menu-5', 'admin-menu-6', 'admin-menu-7', 'admin-menu-8', 'admin-menu-9'],
         patient: ['patient-menu', 'patient-menu-2'],
-        family: ['family-menu']
+        family: ['family-menu', 'patient-menu', 'patient-menu-2']
     };
 
     Object.values(menuIds).flat().forEach((id) => {
@@ -524,8 +563,12 @@ function updateDashboardHero(name, role) {
     if (!title || !detail) return;
 
     if (role === 'family') {
-        title.textContent = `Welcome back, ${name}`;
-        detail.textContent = 'Your private caregiver planner is ready. Tasks stay in this browser and are not linked to patient records.';
+        const hour = new Date().getHours();
+        const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+        title.textContent = `${greeting}, ${name}`;
+        detail.textContent = 'Your family care space is ready with today’s appointments, reminders, and support.';
+        const pill = document.querySelector('.dashboard-hero .hero-pill');
+        if (pill) pill.textContent = 'Family Access';
         return;
     }
 
@@ -577,6 +620,7 @@ async function loadDoctorDashboard() {
         displayDoctorAppointmentCalendar(appointments, 'doctor-main-appointment-calendar');
         displayDoctorLeaves(leaves);
         renderDoctorOperationSchedule(operations);
+        loadDailyCheckIns('doctor-daily-check-ins');
         startLivePatientTelemetry(assignedPatients);
         loadDoctorClinicalRequests(assignedPatients);
         loadDoctorDeathRecords(assignedPatients);
@@ -1348,6 +1392,36 @@ async function openPatientDetail(patientId) {
                     <div class="vital-item"><div class="label">HR</div><div class="value">${patient.vitals.heartRate || '-'}</div></div>
                     <div class="vital-item"><div class="label">RR</div><div class="value">${patient.vitals.respiratoryRate || '-'}</div></div>
                 </div>
+                <section class="rhythm-reference-guide" aria-labelledby="rhythm-reference-title">
+                    <h4 id="rhythm-reference-title">Heart rhythm reference</h4>
+                    <p class="muted-text">Illustrative patterns only — not this patient’s ECG and not a diagnostic tool.</p>
+                    <div class="rhythm-reference-grid">
+                        <article class="rhythm-reference-item">
+                            <strong>Normal rhythm</strong>
+                            <svg viewBox="0 0 220 42" role="img" aria-label="Illustrative regular rhythm at a normal rate">
+                                <path d="M0 22H22l6-2 5 4 7-2h10l6-16 7 30 7-14h8l6 2h13l6-2 5 4 7-2h10l6-16 7 30 7-14h8l6 2h13" />
+                            </svg>
+                        </article>
+                        <article class="rhythm-reference-item">
+                            <strong>Tachycardia (fast)</strong>
+                            <svg viewBox="0 0 220 42" role="img" aria-label="Illustrative regular rhythm at a fast rate">
+                                <path d="M0 22h8l4-2 4 4 5-2h5l5-16 5 30 5-14h5l4 2h8l4-2 4 4 5-2h5l5-16 5 30 5-14h5l4 2h8l4-2 4 4 5-2h5l5-16 5 30 5-14h5l4 2h8l4-2 4 4 5-2h5l5-16 5 30 5-14h5l4 2h8" />
+                            </svg>
+                        </article>
+                        <article class="rhythm-reference-item">
+                            <strong>Bradycardia (slow)</strong>
+                            <svg viewBox="0 0 220 42" role="img" aria-label="Illustrative regular rhythm at a slow rate">
+                                <path d="M0 22h38l6-2 5 4 7-2h12l6-16 7 30 7-14h9l6 2h39l6-2 5 4 7-2h12l6-16 7 30 7-14h9l6 2h18" />
+                            </svg>
+                        </article>
+                        <article class="rhythm-reference-item">
+                            <strong>Irregular rhythm</strong>
+                            <svg viewBox="0 0 220 42" role="img" aria-label="Illustrative irregular rhythm">
+                                <path d="M0 22h10l4-2 4 4 4-2h7l5-15 6 29 6-14h7l6 2h12l5-3 3 6 7-3h4l4-10 5 20 6-13h6l6 2h5l4-2 4 4 4-2h7l6-18 6 32 6-14h7l5 2h9l6-2 4 4 5-2h10" />
+                            </svg>
+                        </article>
+                    </div>
+                </section>
                 <p><strong>Last Updated:</strong> ${new Date(patient.vitals.lastUpdated).toLocaleString()}</p>
                 <div class="button-row">
                     <button class="btn btn-secondary" onclick="switchSection('doctor-section')">Back</button>
@@ -1735,6 +1809,7 @@ async function loadStaffDashboard() {
         displayStaffStats(staffPatientCache, staffAppointmentCache);
         displayStaffMessages(messages);
         displayStaffAppointments(staffAppointmentCache);
+        loadDailyCheckIns('staff-daily-check-ins');
         loadStaffClinicalRequests();
         loadStaffAppointmentReschedules(staffAppointmentCache);
         loadMedicineStock('medicine-stock-list', true);
@@ -2996,12 +3071,52 @@ async function loadFamilyAppointments() {
             return;
         }
         const appointments = await response.json();
+        renderNextFamilyAppointment(appointments);
         container.replaceChildren(...(appointments.length
             ? appointments.map(buildAppointmentActionCard)
             : [clinicalEl('p', 'muted-text', 'Appointments for the linked patient will appear here after booking.')]));
     } catch (error) {
         container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load appointments.'));
     }
+}
+
+function renderNextFamilyAppointment(appointments) {
+    const container = document.getElementById('family-next-appointment-summary');
+    if (!container) return;
+
+    const now = Date.now();
+    const upcoming = (Array.isArray(appointments) ? appointments : [])
+        .filter((appointment) => !['Cancelled', 'Completed'].includes(appointment.status))
+        .map((appointment) => {
+            const requestedTime = appointment.status === 'Reschedule Requested'
+                ? appointment.rescheduleRequest
+                : null;
+            const date = requestedTime?.date || appointment.date;
+            const time = requestedTime?.time || appointment.time;
+            return {
+                ...appointment,
+                displayDate: date,
+                displayTime: time,
+                startsAt: new Date(`${date || ''}T${time || '00:00'}`).getTime()
+            };
+        })
+        .filter((appointment) => Number.isFinite(appointment.startsAt) && appointment.startsAt >= now)
+        .sort((a, b) => a.startsAt - b.startsAt);
+
+    if (!upcoming.length) {
+        container.replaceChildren(clinicalEl('p', 'muted-text', 'No upcoming appointment is scheduled.'));
+        return;
+    }
+
+    const next = upcoming[0];
+    const card = clinicalEl('article', 'family-appointment-card');
+    card.append(clinicalEl('strong', '', next.doctorName || getDoctorLabel(next.doctorId)));
+    card.append(clinicalEl('p', 'muted-text', `${next.displayDate || 'Date not set'}${next.displayTime ? ` · ${next.displayTime}` : ''}`));
+    if (next.doctorDepartment) {
+        card.append(clinicalEl('p', 'muted-text', next.doctorDepartment));
+    }
+    card.append(clinicalEl('span', `clinical-status is-${String(next.status || 'Scheduled').toLowerCase().replace(/\s+/g, '-')}`, next.status || 'Scheduled'));
+    container.replaceChildren(card);
 }
 
 async function loadPatientAppointments() {
@@ -3772,19 +3887,11 @@ function renderMedicineStock(targetId, items, editable) {
     }
 
     container.replaceChildren(...items.map((item) => {
-        const quantityValue = Number(item.quantity);
-        const minimumValue = Number(item.minimum);
-        const outOfStock = quantityValue === 0;
-        const lowStock = quantityValue > 0 && quantityValue <= minimumValue;
-        const row = clinicalEl('article', `medicine-stock-item${outOfStock || lowStock ? ' is-low' : ''}`);
+        const row = clinicalEl('article', `medicine-stock-item${Number(item.quantity) <= Number(item.minimum) ? ' is-low' : ''}`);
         const details = clinicalEl('div', 'medicine-stock-details');
         details.append(clinicalEl('strong', '', item.name || 'Medicine'));
         details.append(clinicalEl('span', '', `${item.quantity} ${item.unit || 'units'} · Low stock at ${item.minimum ?? 0}`));
-        if (outOfStock) {
-            details.append(clinicalEl('small', 'medicine-stock-warning', 'Out of stock — verify physical stock before dispensing'));
-        } else if (lowStock) {
-            details.append(clinicalEl('small', 'medicine-stock-warning', 'Low stock'));
-        }
+        if (Number(item.quantity) <= Number(item.minimum)) details.append(clinicalEl('small', 'medicine-stock-warning', 'Low stock'));
         row.append(details);
 
         if (editable) {
@@ -4333,156 +4440,317 @@ async function loadPatientDashboard() {
     }
 }
 
-function loadFamilyDashboard() {
-    const plannerForm = document.getElementById('caregiver-planner-form');
-    const taskInput = document.getElementById('caregiver-task-title');
-    const dateInput = document.getElementById('caregiver-task-date');
-    const taskList = document.getElementById('caregiver-planner-list');
-    const status = document.getElementById('caregiver-planner-status');
-    const clearButton = document.getElementById('caregiver-planner-clear');
-    const userId = String(currentUser?.id || '');
-    if (!plannerForm || !taskInput || !dateInput || !taskList || !status || !clearButton || !userId) return;
-    if (plannerForm.dataset.initialized === 'true') return;
-    plannerForm.dataset.initialized = 'true';
+const patientFeelingLabels = {
+    good: 'Seems good',
+    okay: 'Seems okay',
+    not_well: 'Does not seem well',
+    need_support: 'Needs the care team to make contact'
+};
 
-    const storageKey = `protocol-caregiver-planner-v1:${userId}`;
-    let tasks = [];
-    try {
-        const savedTasks = localStorage.getItem(storageKey);
-        if (savedTasks) {
-            const parsedTasks = JSON.parse(savedTasks);
-            if (!Array.isArray(parsedTasks)) throw new Error('Saved planner data is not a task list.');
-            tasks = parsedTasks.filter((task) =>
-                task
-                && typeof task.id === 'string'
-                && typeof task.title === 'string'
-                && task.title.length <= 120
-                && (task.dueDate === '' || /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate))
-                && typeof task.done === 'boolean'
-            );
-        }
-    } catch (error) {
-        console.error('Unable to read private caregiver planner:', error);
-        status.textContent = 'Unable to read saved tasks in this browser. Your saved data was not changed.';
-        clearButton.disabled = false;
-        clearButton.addEventListener('click', () => {
-            if (!window.confirm('Remove the unreadable planner data saved in this browser?')) return;
-            try {
-                localStorage.removeItem(storageKey);
-                window.location.reload();
-            } catch (removeError) {
-                console.error('Unable to clear private caregiver planner:', removeError);
-                status.textContent = 'Unable to clear planner data in this browser.';
-            }
-        }, { once: true });
-        return;
+const familyFeelingLabels = {
+    okay: 'Doing okay',
+    worried: 'Feeling worried',
+    need_support: 'Needs support'
+};
+
+function buildDailyCheckInCard(record, includePatientName = false) {
+    const card = clinicalEl('article', 'clinical-card');
+    if (includePatientName) {
+        card.append(clinicalEl('strong', '', `${record.patientName || 'Patient'} · ${record.familyMemberName || 'Family member'}`));
     }
+    const submittedAt = new Date(record.updatedAt || record.createdAt || record.checkInDate || '');
+    const dateLabel = Number.isNaN(submittedAt.getTime()) ? record.checkInDate || '' : submittedAt.toLocaleString();
+    card.append(clinicalEl('p', 'muted-text', dateLabel));
+    const patientFeeling = record.patientFeeling || record.feeling;
+    card.append(clinicalEl('p', '', `Family member observes: ${patientFeelingLabels[patientFeeling] || 'Not recorded'}`));
+    card.append(clinicalEl('p', '', `Family member feels: ${familyFeelingLabels[record.familyFeeling] || 'Not recorded'}`));
+    if (record.note) {
+        card.append(clinicalEl('p', '', record.note));
+    }
+    return card;
+}
 
-    const saveTasks = () => {
-        try {
-            localStorage.setItem(storageKey, JSON.stringify(tasks));
-            status.textContent = 'Saved in this browser only.';
-            return true;
-        } catch (error) {
-            console.error('Unable to save private caregiver planner:', error);
-            status.textContent = 'Unable to save tasks in this browser. Check browser storage settings.';
-            return false;
-        }
-    };
-
-    const formatDueDate = (dueDate) => {
-        if (!dueDate) return '';
-        const [year, month, day] = dueDate.split('-').map(Number);
-        return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(year, month - 1, day));
-    };
-
-    const renderTasks = () => {
-        taskList.replaceChildren();
-        const sortedTasks = [...tasks].sort((a, b) => {
-            if (a.done !== b.done) return Number(a.done) - Number(b.done);
-            if (!a.dueDate) return b.dueDate ? 1 : 0;
-            if (!b.dueDate) return -1;
-            return a.dueDate.localeCompare(b.dueDate);
-        });
-
-        if (sortedTasks.length === 0) {
-            const empty = document.createElement('li');
-            empty.className = 'caregiver-planner-empty';
-            empty.textContent = 'No tasks yet. Add a reminder for yourself above.';
-            taskList.append(empty);
-        }
-
-        sortedTasks.forEach((task) => {
-            const item = document.createElement('li');
-            item.className = `caregiver-planner-item${task.done ? ' is-done' : ''}`;
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.checked = task.done;
-            checkbox.setAttribute('aria-label', `Mark "${task.title}" ${task.done ? 'incomplete' : 'complete'}`);
-            checkbox.addEventListener('change', () => {
-                task.done = checkbox.checked;
-                saveTasks();
-                renderTasks();
-            });
-
-            const details = document.createElement('div');
-            details.className = 'caregiver-planner-task';
-            const title = document.createElement('span');
-            title.textContent = task.title;
-            details.append(title);
-            if (task.dueDate) {
-                const dueDate = document.createElement('time');
-                dueDate.dateTime = task.dueDate;
-                dueDate.textContent = `Due ${formatDueDate(task.dueDate)}`;
-                details.append(dueDate);
-            }
-
-            const remove = document.createElement('button');
-            remove.type = 'button';
-            remove.className = 'btn btn-secondary';
-            remove.textContent = 'Remove';
-            remove.setAttribute('aria-label', `Remove task: ${task.title}`);
-            remove.addEventListener('click', () => {
-                tasks = tasks.filter((entry) => entry.id !== task.id);
-                saveTasks();
-                renderTasks();
-            });
-            item.append(checkbox, details, remove);
-            taskList.append(item);
-        });
-        clearButton.disabled = tasks.length === 0;
-    };
-
-    plannerForm.addEventListener('submit', (event) => {
-        event.preventDefault();
-        const title = taskInput.value.trim();
-        if (!title) {
-            status.textContent = 'Enter a task before adding it.';
-            taskInput.focus();
+async function loadFamilyDailyCheckIns() {
+    const container = document.getElementById('family-daily-check-in-history');
+    if (!container) return;
+    try {
+        const response = await apiCall('/daily-check-ins');
+        if (!response || !response.ok) {
+            container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load your check-in history.'));
             return;
         }
-        tasks.push({
-            id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            title,
-            dueDate: dateInput.value,
-            done: false
-        });
-        if (saveTasks()) {
-            plannerForm.reset();
-            renderTasks();
+        const records = await response.json();
+        container.replaceChildren(...(records.length
+            ? records.slice(0, 5).map((record) => buildDailyCheckInCard(record))
+            : [clinicalEl('p', 'muted-text', 'Your family check-ins will appear here.')]));
+    } catch (error) {
+        console.error('Error loading family check-ins:', error);
+        container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load your check-in history.'));
+    }
+}
+
+function setupFamilyDailyCheckIn() {
+    const form = document.getElementById('family-daily-check-in-form');
+    if (!form || form.dataset.bound === 'true') return;
+    form.dataset.bound = 'true';
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]');
+        const status = document.getElementById('family-daily-check-in-status');
+        if (!button || !status) return;
+
+        button.disabled = true;
+        status.textContent = '';
+        try {
+            const response = await apiCall('/daily-check-ins', {
+                method: 'POST',
+                body: JSON.stringify({
+                    patientFeeling: document.getElementById('family-patient-feeling').value,
+                    familyFeeling: document.getElementById('family-own-feeling').value,
+                    note: document.getElementById('family-check-in-note').value.trim()
+                })
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok) {
+                status.textContent = result.error || 'Unable to share your check-in right now.';
+                return;
+            }
+            status.textContent = result.message || 'Your check-in has been shared with the care team.';
+            document.getElementById('family-check-in-note').value = '';
+            await loadFamilyDailyCheckIns();
+        } catch (error) {
+            console.error('Error submitting family check-in:', error);
+            status.textContent = 'Unable to share your check-in right now.';
+        } finally {
+            button.disabled = false;
         }
     });
+}
 
-    clearButton.addEventListener('click', () => {
-        if (!tasks.length || !window.confirm('Clear all tasks saved in this browser?')) return;
-        tasks = [];
-        if (saveTasks()) renderTasks();
+async function loadDailyCheckIns(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    try {
+        const response = await apiCall('/daily-check-ins');
+        if (!response || !response.ok) {
+            container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Daily check-ins are unavailable.'));
+            return;
+        }
+        const records = await response.json();
+        container.replaceChildren(...(records.length
+            ? records.slice(0, 30).map((record) => buildDailyCheckInCard(record, true))
+            : [clinicalEl('p', 'muted-text', 'No patient check-ins have been submitted yet.')]));
+    } catch (error) {
+        console.error('Error loading care-team check-ins:', error);
+        container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load daily check-ins.'));
+    }
+}
+
+function getMalaysiaDateString() {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kuala_Lumpur',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+}
+
+function setupFamilyReminderForm() {
+    const form = document.getElementById('family-reminder-form');
+    if (!form || form.dataset.bound === 'true') return;
+    form.dataset.bound = 'true';
+    const dateInput = document.getElementById('family-reminder-date');
+    if (!dateInput) return;
+    dateInput.min = getMalaysiaDateString();
+    dateInput.value = dateInput.min;
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]');
+        const status = document.getElementById('family-reminder-status');
+        if (!button || !status) return;
+
+        button.disabled = true;
+        status.textContent = '';
+        try {
+            const response = await apiCall('/family-reminders', {
+                method: 'POST',
+                body: JSON.stringify({
+                    title: document.getElementById('family-reminder-title').value.trim(),
+                    date: dateInput.value,
+                    time: document.getElementById('family-reminder-time').value,
+                    note: ''
+                })
+            });
+            const result = response ? await response.json().catch(() => ({})) : {};
+            if (!response || !response.ok) {
+                status.textContent = result.error || 'Unable to save this reminder.';
+                return;
+            }
+            form.reset();
+            dateInput.min = getMalaysiaDateString();
+            dateInput.value = dateInput.min;
+            status.textContent = result.message || 'Reminder saved.';
+            await loadFamilyReminders();
+        } catch (error) {
+            console.error('Error saving family reminder:', error);
+            status.textContent = 'Unable to save this reminder right now.';
+        } finally {
+            button.disabled = false;
+        }
     });
+}
 
-    renderTasks();
-    status.textContent = tasks.length
-        ? 'Tasks loaded from this browser only.'
-        : 'Tasks are stored in this browser only and are not synced.';
+async function updateFamilyReminder(reminderId, method, payload = {}) {
+    try {
+        const response = await apiCall(`/family-reminders/${reminderId}`, {
+            method,
+            body: method === 'PUT' ? JSON.stringify(payload) : undefined
+        });
+        const result = response ? await response.json().catch(() => ({})) : {};
+        if (!response || !response.ok) {
+            showNotification(result.error || 'Unable to update reminder.', 'danger');
+            return;
+        }
+        await loadFamilyReminders();
+    } catch (error) {
+        console.error('Error updating family reminder:', error);
+        showNotification('Unable to update reminder right now.', 'danger');
+    }
+}
+
+async function loadFamilyReminders() {
+    const container = document.getElementById('family-reminder-list');
+    if (!container) return;
+    try {
+        const response = await apiCall('/family-reminders');
+        if (!response || !response.ok) {
+            container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Reminders are unavailable right now.'));
+            return;
+        }
+        const reminders = await response.json();
+        if (!reminders.length) {
+            container.replaceChildren(clinicalEl('p', 'muted-text', 'No reminders yet. Add one for something you want to remember.'));
+            return;
+        }
+
+        const today = getMalaysiaDateString();
+        container.replaceChildren(...reminders.slice(0, 20).map((reminder) => {
+            const card = clinicalEl('article', `family-reminder-card${reminder.completed ? ' is-complete' : ''}`);
+            const detail = clinicalEl('div', 'family-reminder-detail');
+            detail.append(clinicalEl('strong', '', reminder.title || 'Reminder'));
+            const dateLabel = reminder.date === today ? 'Today' : reminder.date;
+            detail.append(clinicalEl('p', 'muted-text', `${dateLabel}${reminder.time ? ` · ${reminder.time}` : ''}`));
+            if (reminder.note) detail.append(clinicalEl('p', 'muted-text', reminder.note));
+            const controls = clinicalEl('div', 'family-reminder-actions');
+            const status = clinicalEl('span', `clinical-status ${reminder.completed ? 'is-approved' : 'is-awaiting_doctor'}`, reminder.completed ? 'Done' : 'Upcoming');
+            controls.append(status);
+            if (!reminder.completed) {
+                const complete = clinicalEl('button', 'btn btn-small btn-secondary', 'Mark done');
+                complete.type = 'button';
+                complete.addEventListener('click', () => updateFamilyReminder(reminder.id, 'PUT', { completed: true }));
+                controls.append(complete);
+            }
+            const remove = clinicalEl('button', 'btn btn-small btn-secondary', 'Remove');
+            remove.type = 'button';
+            remove.addEventListener('click', () => {
+                if (window.confirm(`Remove reminder “${reminder.title}”?`)) {
+                    updateFamilyReminder(reminder.id, 'DELETE');
+                }
+            });
+            controls.append(remove);
+            card.append(detail, controls);
+            return card;
+        }));
+    } catch (error) {
+        console.error('Error loading family reminders:', error);
+        container.replaceChildren(clinicalEl('p', 'clinical-api-unavailable', 'Unable to load reminders right now.'));
+    }
+}
+
+async function loadFamilyDashboard() {
+    const container = document.getElementById('family-content');
+    if (!container) return;
+
+    setupFamilyDailyCheckIn();
+    setupFamilyReminderForm();
+    loadFamilyReminders();
+
+    try {
+        const [response, messagesResponse] = await Promise.all([
+            apiCall('/patients/me'),
+            apiCall('/messages')
+        ]);
+        if (!response || !response.ok) {
+            container.innerHTML = `
+                <div class="card">
+                    <h3>Family Patient Information</h3>
+                    <p class="muted-text">This family profile is not linked to a patient record yet. Please ensure the patient email is registered correctly.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const patient = await response.json();
+        const welcomeDetail = document.getElementById('dashboard-welcome-detail');
+        if (welcomeDetail) {
+            welcomeDetail.textContent = `Here’s today’s care plan for ${patient.name || 'your loved one'}—appointments, reminders, and support in one place.`;
+        }
+        const messages = messagesResponse && messagesResponse.ok ? await messagesResponse.json() : [];
+        renderFamilyHospitalAlerts((Array.isArray(messages) ? messages : []).filter((message) =>
+            message.type === 'family-hospital-alert'
+            && Number(message.metadata?.patientId) === Number(patient.id)
+        ));
+        patientAssignedDoctorId = Number(patient.assignedDoctor) || null;
+        renderPatientHealthPanel(patient, 'family-content');
+        const checkInSection = document.getElementById('family-daily-check-in-section');
+        if (checkInSection) checkInSection.hidden = false;
+        loadFamilyDailyCheckIns();
+        loadFamilyClinicalRecords();
+        loadFamilyDeathRecords();
+        loadFamilyAppointments();
+        loadMedicalDocuments('family-medical-document-list', Number(patient.id));
+    } catch (error) {
+        console.error('Error loading family dashboard:', error);
+        container.innerHTML = `
+            <div class="card">
+                <h3>Family Patient Information</h3>
+                <p class="muted-text">Unable to load the patient information right now.</p>
+            </div>
+        `;
+    }
+}
+
+function renderFamilyHospitalAlerts(alerts) {
+    const container = document.getElementById('family-urgent-alerts');
+    if (!container) return;
+
+    const latestAlerts = alerts
+        .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+        .slice(0, 5);
+    const signature = latestAlerts.map((alert) => `${alert.id}:${alert.read ? 1 : 0}`).join('|');
+    if (signature === familyHospitalAlertSignature) return;
+    familyHospitalAlertSignature = signature;
+    container.replaceChildren();
+
+    latestAlerts.forEach((alert) => {
+        const item = document.createElement('article');
+        item.className = 'family-hospital-alert';
+        item.setAttribute('role', 'alert');
+
+        const title = document.createElement('h2');
+        title.textContent = alert.title || 'Urgent: please come to the hospital';
+        const content = document.createElement('p');
+        content.textContent = alert.content || 'The doctor has requested that family come to the hospital now.';
+        const timestamp = document.createElement('time');
+        timestamp.dateTime = alert.timestamp || '';
+        timestamp.textContent = alert.timestamp ? new Date(alert.timestamp).toLocaleString() : '';
+
+        item.append(title, content, timestamp);
+        container.append(item);
+    });
 }
 
 function buildPatientHeartRateHistory(patient) {
@@ -4517,68 +4785,43 @@ function buildPatientHeartRateHistory(patient) {
     }));
 }
 
-function getFamilyDisplayVitals(patient) {
-    const recordedVitals = patient?.vitals || {};
-    const hasRecordedHeartRate = Number.isFinite(Number(recordedVitals.heartRate)) && Number(recordedVitals.heartRate) > 0;
-    const hasRecordedBloodPressure = /^\s*\d{2,3}\s*\/\s*\d{2,3}\s*$/.test(String(recordedVitals.bloodPressure || ''));
-
-    if (hasRecordedHeartRate || hasRecordedBloodPressure) {
-        return { vitals: recordedVitals, simulated: false };
-    }
-
-    const severity = String(patient?.severity || 'Moderate');
-    const severityKey = severity.toLowerCase();
-    const profileKey = `${patient?.id || 'unlinked'}:${severityKey}`;
-    if (!familyDemoVitalsByPatient.has(profileKey)) {
-        const profiles = {
-            critical: { hr: [118, 138], systolic: [145, 175], diastolic: [90, 112] },
-            severe: { hr: [98, 118], systolic: [130, 158], diastolic: [82, 102] },
-            moderate: { hr: [78, 99], systolic: [118, 143], diastolic: [72, 92] },
-            mild: { hr: [62, 88], systolic: [108, 132], diastolic: [65, 85] }
-        };
-        const profile = profiles[severityKey] || profiles.moderate;
-        const randomInRange = ([min, max]) => min + Math.floor(Math.random() * (max - min + 1));
-        familyDemoVitalsByPatient.set(profileKey, {
-            heartRate: randomInRange(profile.hr),
-            bloodPressure: `${randomInRange(profile.systolic)}/${randomInRange(profile.diastolic)}`,
-            lastUpdated: new Date().toISOString()
-        });
-    }
-
-    return { vitals: { ...recordedVitals, ...familyDemoVitalsByPatient.get(profileKey) }, simulated: true };
-}
-
 function renderPatientHealthPanel(patient, targetId = 'patient-content') {
     const container = document.getElementById(targetId);
     if (!container) return;
 
     const isFamilyView = targetId === 'family-content';
-    const familyVitals = isFamilyView ? getFamilyDisplayVitals(patient) : null;
-    const vitals = familyVitals ? familyVitals.vitals : (patient?.vitals || {});
-    const isSimulated = Boolean(familyVitals?.simulated);
+    if (isFamilyView) {
+        const card = clinicalEl('div', 'card patient-monitor-card');
+        const header = clinicalEl('div', 'patient-monitor-head');
+        const details = clinicalEl('div');
+        details.append(clinicalEl('h3', '', patient.name || 'Linked patient'));
+        details.append(clinicalEl('p', '', `Doctor in charge: ${getDoctorLabel(patient.assignedDoctor)}`));
+        header.append(details);
+        card.append(header);
+        container.replaceChildren(card);
+        return;
+    }
+
+    const vitals = patient?.vitals || {};
     const severity = patient?.severity || 'Moderate';
     const doctorName = getDoctorLabel(patient?.assignedDoctor);
     const updatedAt = vitals.lastUpdated ? new Date(vitals.lastUpdated) : new Date();
-    if (!isFamilyView) {
-        patientVitalsHistory = buildPatientHeartRateHistory(patient);
-    }
+    patientVitalsHistory = buildPatientHeartRateHistory(patient);
 
-    const heartRatePanel = isFamilyView
-        ? buildFamilyEcgGuide(vitals.heartRate, severity, isSimulated)
-        : `
-            <div class="patient-hr-chart-wrap">
-                <div class="chart-header-row">
-                    <h4>Heart Rate Trend</h4>
-                    <span class="muted-text">Updated ${updatedAt.toLocaleTimeString()}</span>
-                </div>
-                <canvas id="patient-hr-chart" width="860" height="220" aria-label="Heart rate trend chart"></canvas>
-                <div class="chart-legend-inline">
-                    <span><i class="legend-dot hr"></i>Heart Rate</span>
-                    <span><i class="legend-dot safe"></i>Normal Band (60-100 bpm)</span>
-                    <span><i class="legend-dot danger"></i>Critical Thresholds (&lt;50 / &gt;120)</span>
-                </div>
+    const heartRatePanel = `
+        <div class="patient-hr-chart-wrap">
+            <div class="chart-header-row">
+                <h4>Heart Rate Trend</h4>
+                <span class="muted-text">Updated ${updatedAt.toLocaleTimeString()}</span>
             </div>
-        `;
+            <canvas id="patient-hr-chart" width="860" height="220" aria-label="Heart rate trend chart"></canvas>
+            <div class="chart-legend-inline">
+                <span><i class="legend-dot hr"></i>Heart Rate</span>
+                <span><i class="legend-dot safe"></i>Normal Band (60-100 bpm)</span>
+                <span><i class="legend-dot danger"></i>Critical Thresholds (&lt;50 / &gt;120)</span>
+            </div>
+        </div>
+    `;
 
     container.innerHTML = `
         <div class="card patient-monitor-card">
@@ -4593,8 +4836,6 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
 
             <div id="patient-vitals-alerts" class="patient-alert-stack"></div>
 
-            ${isFamilyView && isSimulated ? '<p class="family-vitals-source">Simulated demo values based on severity. These are not patient readings.</p>' : ''}
-
             <div class="vitals-grid">
                 <div class="vital-item"><div class="label">Heart Rate</div><div class="value">${vitals.heartRate ?? '-'} bpm</div></div>
                 <div class="vital-item"><div class="label">Respiratory</div><div class="value">${vitals.respiratoryRate ?? '-'} /min</div></div>
@@ -4607,7 +4848,7 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
         </div>
     `;
 
-    if (!isFamilyView && vitals.heartRate) {
+    if (vitals.heartRate) {
         patientVitalsHistory = [{
             ts: Date.now(),
             heartRate: Number(vitals.heartRate),
@@ -4617,54 +4858,8 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
         }, ...patientVitalsHistory.slice(0, MAX_PATIENT_HISTORY_POINTS - 1)];
     }
 
-    if (!isFamilyView) renderPatientHrChart();
-    if (!isFamilyView || !isSimulated) renderPatientVitalAlerts(vitals);
-}
-
-function buildFamilyEcgGuide(heartRate, severity, isSimulated) {
-    const bpm = Number(heartRate);
-    const hasHeartRate = Number.isFinite(bpm) && bpm > 0;
-    const points = [];
-    if (hasHeartRate) {
-        const spacing = Math.max(28, Math.min(90, 82 - (bpm - 60) * 0.5));
-        for (let position = 0; position < 520; position += spacing) {
-            points.push(
-                [position, 26],
-                [position + spacing * 0.13, 26],
-                [position + spacing * 0.18, 23],
-                [position + spacing * 0.23, 26],
-                [position + spacing * 0.34, 26],
-                [position + spacing * 0.39, 32],
-                [position + spacing * 0.43, 7],
-                [position + spacing * 0.48, 35],
-                [position + spacing * 0.55, 26],
-                [position + spacing * 0.73, 21],
-                [position + spacing * 0.83, 26],
-                [position + spacing, 26]
-            );
-        }
-    }
-    const path = points.map((point, index) => `${index ? 'L' : 'M'}${point[0].toFixed(1)} ${point[1]}`).join(' ');
-    const readingLabel = hasHeartRate ? `${Math.round(bpm)} bpm` : 'No heart-rate reading';
-    const sourceLabel = isSimulated ? `${severity} demo profile` : 'Recorded reading';
-    const trace = hasHeartRate
-        ? `<svg class="family-ecg-trace" viewBox="0 0 520 52" preserveAspectRatio="none" role="img" aria-label="One illustrative heart-rate trace"><path d="${path}"></path></svg>`
-        : '<p class="family-ecg-no-signal">No heart-rate reading is recorded yet.</p>';
-
-    return `
-        <section class="family-ecg-panel" aria-label="Heart rate pattern guide">
-            <div class="family-ecg-heading">
-                <div>
-                    <h4>Heart-rate pattern</h4>
-                    <p><strong>${readingLabel}</strong> · ${sourceLabel}</p>
-                </div>
-            </div>
-            <div class="family-ecg-row is-current">
-                ${trace}
-            </div>
-            <p class="family-ecg-note">Illustrative trace only, not an ECG recording or diagnosis. ${isSimulated ? 'Demo values change by severity and are not real patient measurements.' : ''}</p>
-        </section>
-    `;
+    renderPatientHrChart();
+    renderPatientVitalAlerts(vitals);
 }
 
 function pushPatientVitalsHistory(vitals) {

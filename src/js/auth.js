@@ -269,6 +269,8 @@ if (document.getElementById('familySignupForm')) {
         const signupPhone = document.getElementById('family-phone').value.trim();
         const normalizedPhone = signupPhone.replace(/[\s().-]/g, '');
         const signupPassword = document.getElementById('signup-password').value;
+        const patientEmail = document.getElementById('linked-patient-email').value.trim();
+        const relationship = document.getElementById('relationship').value.trim();
         const signupMessage = document.getElementById('signupMessage');
         const errorDiv = document.getElementById('errorMessage');
 
@@ -286,7 +288,9 @@ if (document.getElementById('familySignupForm')) {
                 email: signupEmail,
                 phone: normalizedPhone,
                 password: signupPassword,
-                role: 'family'
+                role: 'family',
+                patientEmail,
+                relationship
             });
 
             if (signupMessage) {
@@ -306,7 +310,7 @@ if (document.getElementById('familySignupForm')) {
                 if (loginEmail) loginEmail.value = signupEmail;
                 if (loginTab) loginTab.click();
                 if (loginError) {
-                    loginError.textContent = 'An account already uses this email. Sign in with your own family account email and password.';
+                    loginError.textContent = 'An account already uses this email. Sign in if it is your family account. If it belongs to the patient, create the family account with your own email and keep the patient email in the patient email field.';
                     loginError.classList.add('show');
                 }
                 return;
