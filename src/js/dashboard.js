@@ -445,6 +445,14 @@ async function triggerFamilyCodeBlueContact(patient, roomNumber, note) {
 async function initializeDashboard() {
     if (!requireAuth()) return;
 
+    window.addEventListener('storage', (event) => {
+        if ((event.key === 'authToken' || event.key === 'currentUser' || event.key === null)
+            && (localStorage.getItem('authToken') !== authToken
+                || localStorage.getItem('currentUser') !== JSON.stringify(currentUser))) {
+            window.location.reload();
+        }
+    });
+
     const role = new URLSearchParams(window.location.search).get('role') || currentUser.role;
 
     if (typeof window.showRoleMenu === 'function') {
@@ -3088,11 +3096,8 @@ function renderNextFamilyAppointment(appointments) {
     const upcoming = (Array.isArray(appointments) ? appointments : [])
         .filter((appointment) => !['Cancelled', 'Completed'].includes(appointment.status))
         .map((appointment) => {
-            const requestedTime = appointment.status === 'Reschedule Requested'
-                ? appointment.rescheduleRequest
-                : null;
-            const date = requestedTime?.date || appointment.date;
-            const time = requestedTime?.time || appointment.time;
+            const date = appointment.date;
+            const time = appointment.time;
             return {
                 ...appointment,
                 displayDate: date,
@@ -3114,6 +3119,9 @@ function renderNextFamilyAppointment(appointments) {
     card.append(clinicalEl('p', 'muted-text', `${next.displayDate || 'Date not set'}${next.displayTime ? ` · ${next.displayTime}` : ''}`));
     if (next.doctorDepartment) {
         card.append(clinicalEl('p', 'muted-text', next.doctorDepartment));
+    }
+    if (next.status === 'Reschedule Requested' && next.rescheduleRequest) {
+        card.append(clinicalEl('p', 'appointment-reschedule-note', `Requested: ${next.rescheduleRequest.date} · ${next.rescheduleRequest.time} (awaiting approval)`));
     }
     card.append(clinicalEl('span', `clinical-status is-${String(next.status || 'Scheduled').toLowerCase().replace(/\s+/g, '-')}`, next.status || 'Scheduled'));
     container.replaceChildren(card);
@@ -4670,6 +4678,23 @@ async function loadFamilyReminders() {
     }
 }
 
+function clearFamilyPatientDetails() {
+    patientAssignedDoctorId = null;
+    familyHospitalAlertSignature = '';
+    const checkInSection = document.getElementById('family-daily-check-in-section');
+    if (checkInSection) checkInSection.hidden = true;
+    [
+        'family-urgent-alerts', 'family-next-appointment-summary', 'family-daily-check-in-history',
+        'family-clinical-list', 'family-blood-trends', 'family-death-list',
+        'family-appointment-list', 'family-medical-document-list'
+    ].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) element.replaceChildren();
+    });
+    const detail = document.getElementById('dashboard-welcome-detail');
+    if (detail) detail.textContent = 'Your family care space is ready with reminders and support.';
+}
+
 async function loadFamilyDashboard() {
     const container = document.getElementById('family-content');
     if (!container) return;
@@ -4684,10 +4709,14 @@ async function loadFamilyDashboard() {
             apiCall('/messages')
         ]);
         if (!response || !response.ok) {
+            clearFamilyPatientDetails();
+            const message = response && response.status === 404
+                ? 'The linked patient record could not be verified. Please contact the hospital to check the patient email and account link.'
+                : 'Unable to load the patient information right now. Please try again.';
             container.innerHTML = `
                 <div class="card">
                     <h3>Family Patient Information</h3>
-                    <p class="muted-text">This family profile is not linked to a patient record yet. Please ensure the patient email is registered correctly.</p>
+                    <p class="muted-text">${message}</p>
                 </div>
             `;
             return;
@@ -4714,6 +4743,7 @@ async function loadFamilyDashboard() {
         loadMedicalDocuments('family-medical-document-list', Number(patient.id));
     } catch (error) {
         console.error('Error loading family dashboard:', error);
+        clearFamilyPatientDetails();
         container.innerHTML = `
             <div class="card">
                 <h3>Family Patient Information</h3>
@@ -4795,7 +4825,10 @@ function renderPatientHealthPanel(patient, targetId = 'patient-content') {
         const header = clinicalEl('div', 'patient-monitor-head');
         const details = clinicalEl('div');
         details.append(clinicalEl('h3', '', patient.name || 'Linked patient'));
-        details.append(clinicalEl('p', '', `Doctor in charge: ${getDoctorLabel(patient.assignedDoctor)}`));
+        const doctorLabel = patient.assignedDoctorName
+            ? `${patient.assignedDoctorName}${patient.assignedDoctorDepartment ? ` (${patient.assignedDoctorDepartment})` : ''}`
+            : patient.assignedDoctor ? 'Doctor details unavailable; please contact the care team' : 'Not assigned';
+        details.append(clinicalEl('p', '', `Doctor in charge: ${doctorLabel}`));
         header.append(details);
         card.append(header);
         container.replaceChildren(card);

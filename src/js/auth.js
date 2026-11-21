@@ -101,7 +101,7 @@ async function registerAccount(payload) {
 }
 
 // Login function
-async function login(username, password) {
+async function login(username, password, expectedUserId = null) {
     try {
         const response = await fetch(`${AUTH_API}/login`, {
             method: 'POST',
@@ -134,6 +134,10 @@ async function login(username, password) {
             data = JSON.parse(responseText);
         } catch (_) {
             throw new Error('Server returned non-JSON response. Please check API path and Apache rewrite settings.');
+        }
+
+        if (expectedUserId !== null && Number(data.user?.id) !== Number(expectedUserId)) {
+            throw new Error('The signed-in account does not match the new account. Please sign in with your family email.');
         }
 
         authToken = data.token;
@@ -198,12 +202,16 @@ function showLoginSuccess(name, role) {
     overlay.classList.add('visible');
 }
 
-// Logout function
-function logout() {
+function clearAuthSession() {
     localStorage.removeItem('authToken');
     localStorage.removeItem('currentUser');
     authToken = null;
     currentUser = {};
+}
+
+// Logout function
+function logout() {
+    clearAuthSession();
     const loginDestination = `${getAppBasePath()}index.html`;
     window.location.href = window.location.protocol === 'file:'
         ? './index.html'
@@ -293,12 +301,16 @@ if (document.getElementById('familySignupForm')) {
                 relationship
             });
 
+            clearAuthSession();
             if (signupMessage) {
                 signupMessage.textContent = 'Family account created successfully. Logging in...';
                 signupMessage.style.color = '#1d7a5c';
             }
 
-            await login(signupEmail, signupPassword);
+            if (!registration?.user?.id) {
+                throw new Error('The account was created, but its identity could not be verified. Please sign in.');
+            }
+            await login(signupEmail, signupPassword, registration.user.id);
             if (registration && registration.user) {
                 return;
             }
